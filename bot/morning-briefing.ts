@@ -3,9 +3,7 @@ import { fetchCryptoBars } from './crypto-fetch';
 import { analyzeWave } from './wave-strategy';
 import { log } from './logger';
 import { sendTelegramMessage } from './telegram';
-
-const STOCK_WATCHLIST = (process.env.WATCHLIST || 'TSLA,NVDA,SPY,AAPL,AMZN').split(',');
-const CRYPTO_WATCHLIST = ['BTC-USD', 'ETH-USD', 'SOL-USD'];
+import { STOCK_WATCHLIST, CRYPTO_WATCHLIST } from './watchlist';
 
 interface MarketMover {
   symbol: string;
@@ -101,7 +99,8 @@ async function fetchMarketNews(): Promise<NewsItem[]> {
 
   try {
     // Yahoo Finance RSS for market news
-    const res = await fetch('https://feeds.finance.yahoo.com/rss/2.0/headline?s=TSLA,NVDA,AAPL,SPY,BTC-USD&region=US&lang=en-US', {
+    const newsSymbols = [...STOCK_WATCHLIST.slice(0, 10), 'BTC-USD'].join(',');
+    const res = await fetch(`https://feeds.finance.yahoo.com/rss/2.0/headline?s=${newsSymbols}&region=US&lang=en-US`, {
       headers: { 'User-Agent': 'Mozilla/5.0' },
     });
 

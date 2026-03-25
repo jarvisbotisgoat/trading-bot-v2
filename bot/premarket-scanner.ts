@@ -1,5 +1,6 @@
 import { log } from './logger';
 import { sendTelegramMessage } from './telegram';
+import { FULL_SCAN_LIST } from './watchlist';
 
 /**
  * Premarket Scanner
@@ -8,18 +9,6 @@ import { sendTelegramMessage } from './telegram';
  * Sends Telegram alerts for anything worth watching at the open.
  * Runs every 30 min from 4 AM – 6:30 AM PST.
  */
-
-// Broad scan list — popular tickers retail traders care about
-const SCAN_LIST = [
-  // Mega caps
-  'TSLA', 'NVDA', 'AAPL', 'AMZN', 'GOOGL', 'META', 'MSFT', 'NFLX',
-  // Meme / high-vol
-  'AMD', 'PLTR', 'SOFI', 'NIO', 'RIVN', 'COIN', 'MARA', 'RIOT',
-  // ETFs
-  'SPY', 'QQQ', 'IWM',
-  // Crypto
-  'BTC-USD', 'ETH-USD', 'SOL-USD',
-];
 
 interface ScanHit {
   symbol: string;
@@ -141,7 +130,7 @@ export async function runPremarketScan(): Promise<void> {
   await log('info', 'Premarket scanner running');
 
   // Fetch all quotes in parallel
-  const results = await Promise.all(SCAN_LIST.map(fetchQuote));
+  const results = await Promise.all(FULL_SCAN_LIST.map(fetchQuote));
   const hits = results.filter((r): r is ScanHit => r !== null);
 
   // Filter for interesting movers: >1% move or unusual volume
