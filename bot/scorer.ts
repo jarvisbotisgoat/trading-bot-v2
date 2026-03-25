@@ -1,7 +1,7 @@
 import { getServiceClient } from '../lib/supabase';
 import type { Trade, DailySummary } from '../lib/types';
 import { log } from './logger';
-import { sendDailyRecap } from './telegram';
+// Telegram alerts disabled — user wants morning briefs only
 
 export async function runDailyScoring(): Promise<void> {
   const supabase = getServiceClient();
@@ -143,6 +143,5 @@ export async function runDailyScoring(): Promise<void> {
 
   await log('info', 'Daily scoring complete', { summary });
 
-  // Send Telegram recap
-  await sendDailyRecap(notes);
+  // No Telegram recap — morning briefing is the only message
 }

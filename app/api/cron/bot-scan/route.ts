@@ -21,7 +21,8 @@ export async function GET(req: NextRequest) {
     .eq('id', 1)
     .single();
 
-  if (!control?.is_running) {
+  // Default to running if no control row exists
+  if (control && !control.is_running) {
     return NextResponse.json({ status: 'skipped', reason: 'Bot is stopped' });
   }
 

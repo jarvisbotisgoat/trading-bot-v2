@@ -11,8 +11,9 @@ export async function GET() {
     .eq('id', 1)
     .single();
 
-  if (error) {
-    return NextResponse.json({ is_running: false, updated_at: null });
+  if (error || !data) {
+    // Default to running — bot should always be active unless explicitly stopped
+    return NextResponse.json({ is_running: true, updated_at: null });
   }
 
   return NextResponse.json(data);
