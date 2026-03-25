@@ -167,7 +167,7 @@ export async function runScan(): Promise<ScanResult[]> {
       // For crypto: use wave strategy. For stocks: use standard setups.
       let signals;
       if (isCrypto) {
-        const wave = detectWave({ symbol, bars, vwap });
+        const wave = await detectWave({ symbol, bars, vwap });
         signals = wave ? [wave] : [];
       } else {
         signals = detectSetups({ symbol, bars, vwap, prevHod });

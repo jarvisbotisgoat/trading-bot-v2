@@ -1,47 +1,39 @@
 import type { PriceBar, SetupSignal } from '../lib/types';
+import { getServiceClient } from '../lib/supabase';
 
 /**
- * Crypto Wave Rider Strategy
+ * Crypto Wave Rider — Smart Edition
  *
- * Aggressive momentum strategy that catches waves up AND down.
- * Multiple independent triggers — any ONE can fire a trade:
+ * Uses confluence scoring: each indicator adds points.
+ * Needs 3+ points to enter a trade (not just one trigger).
+ * Learns from recent trades — avoids setups that keep losing,
+ * leans into setups that keep winning.
  *
- * 1. EMA crossover (8 vs 21)
- * 2. Strong candle move (>0.3% in one bar with any volume)
- * 3. Price bouncing off VWAP
- * 4. RSI reversal from extremes
- * 5. 3-bar momentum streak
+ * Trades both LONG and SHORT on any crypto.
  */
 
 function ema(bars: PriceBar[], period: number): number[] {
   const multiplier = 2 / (period + 1);
   const result: number[] = [];
-
   let sum = 0;
   for (let i = 0; i < Math.min(period, bars.length); i++) {
     sum += bars[i].close;
   }
   result[Math.min(period, bars.length) - 1] = sum / Math.min(period, bars.length);
-
   for (let i = period; i < bars.length; i++) {
     result[i] = (bars[i].close - result[i - 1]) * multiplier + result[i - 1];
   }
-
   return result;
 }
 
 function rsi(bars: PriceBar[], period: number = 14): number {
   if (bars.length < period + 1) return 50;
-
-  let gains = 0;
-  let losses = 0;
-
+  let gains = 0, losses = 0;
   for (let i = bars.length - period; i < bars.length; i++) {
     const change = bars[i].close - bars[i - 1].close;
     if (change > 0) gains += change;
     else losses += Math.abs(change);
   }
-
   const avgGain = gains / period;
   const avgLoss = losses / period;
   if (avgLoss === 0) return 100;
@@ -53,13 +45,37 @@ function avgVolume(bars: PriceBar[]): number {
   return bars.reduce((sum, b) => sum + b.volume, 0) / bars.length;
 }
 
+// How many of the last N closed trades were wins for this setup type?
+async function getRecentWinRate(setupType: string): Promise<{ wins: number; losses: number; avgPnl: number }> {
+  try {
+    const supabase = getServiceClient();
+    const { data } = await supabase
+      .from('trades')
+      .select('outcome, pnl_percent')
+      .eq('status', 'closed')
+      .eq('setup_type', setupType)
+      .order('exit_time', { ascending: false })
+      .limit(10);
+
+    if (!data || data.length === 0) return { wins: 0, losses: 0, avgPnl: 0 };
+
+    const wins = data.filter((t: { outcome: string }) => t.outcome === 'win').length;
+    const losses = data.filter((t: { outcome: string }) => t.outcome === 'loss').length;
+    const avgPnl = data.reduce((sum: number, t: { pnl_percent: number | null }) => sum + (t.pnl_percent || 0), 0) / data.length;
+
+    return { wins, losses, avgPnl };
+  } catch {
+    return { wins: 0, losses: 0, avgPnl: 0 };
+  }
+}
+
 interface WaveInput {
   symbol: string;
   bars: PriceBar[];
   vwap: number;
 }
 
-export function detectWave(input: WaveInput): SetupSignal | null {
+export async function detectWave(input: WaveInput): Promise<SetupSignal | null> {
   const { symbol, bars, vwap } = input;
   if (bars.length < 25) return null;
 
@@ -79,121 +95,158 @@ export function detectWave(input: WaveInput): SetupSignal | null {
   if (!fastNow || !fastPrev || !slowNow || !slowPrev) return null;
 
   const price = latest.close;
-  const riskAmount = price * 0.005; // 0.5% risk
   const barMove = (latest.close - latest.open) / latest.open;
-  const prevMove = (prev.close - prev.open) / prev.open;
   const volumeRatio = avgVol > 0 ? latest.volume / avgVol : 1;
 
-  // ============ LONG TRIGGERS ============
-  let longReason: string | null = null;
-  let longScore = 0;
+  // ============ CONFLUENCE SCORING: LONG ============
+  let longPoints = 0;
+  const longReasons: string[] = [];
 
-  // Trigger 1: EMA crossover
+  // +2: EMA crossover just happened
   if (fastPrev <= slowPrev && fastNow > slowNow) {
-    longReason = `EMA8 crossed above EMA21`;
-    longScore = 7;
+    longPoints += 2;
+    longReasons.push('EMA cross up');
   }
 
-  // Trigger 2: Strong bullish candle (>0.3% move up)
-  if (!longReason && barMove > 0.003) {
-    longReason = `Strong bullish candle (+${(barMove * 100).toFixed(2)}%)`;
-    longScore = 5;
+  // +1: EMA8 already above EMA21 (trend aligned)
+  if (fastNow > slowNow) {
+    longPoints += 1;
+    longReasons.push('EMA trend up');
   }
 
-  // Trigger 3: VWAP bounce — price dipped near/below VWAP and bounced
-  if (!longReason && prev.low <= vwap * 1.001 && latest.close > vwap && latest.close > prev.close) {
-    longReason = `VWAP bounce at $${vwap.toFixed(0)}`;
-    longScore = 6;
+  // +1: Price above VWAP
+  if (price > vwap) {
+    longPoints += 1;
+    longReasons.push('above VWAP');
   }
 
-  // Trigger 4: RSI reversal from oversold
-  if (!longReason && currentRsi > 35 && currentRsi < 50 && rsi(bars.slice(0, -1)) < 35) {
-    longReason = `RSI reversal from oversold (${currentRsi.toFixed(0)})`;
-    longScore = 6;
+  // +1: RSI in healthy zone (not overbought, not flat)
+  if (currentRsi > 40 && currentRsi < 65) {
+    longPoints += 1;
+    longReasons.push(`RSI ${currentRsi.toFixed(0)}`);
   }
 
-  // Trigger 5: 3-bar momentum streak up
-  if (!longReason && latest.close > prev.close && prev.close > prev2.close && barMove > 0 && prevMove > 0) {
-    longReason = `3-bar bullish momentum streak`;
-    longScore = 5;
+  // +1: Volume above average
+  if (volumeRatio > 1.0) {
+    longPoints += 1;
+    longReasons.push(`vol ${volumeRatio.toFixed(1)}x`);
   }
 
-  // Fire long if we have a reason and RSI isn't overbought
-  if (longReason && currentRsi < 75) {
-    // Bonus points
-    if (price > vwap) longScore = Math.min(10, longScore + 1);
-    if (fastNow > slowNow) longScore = Math.min(10, longScore + 1);
-    if (volumeRatio > 1) longScore = Math.min(10, longScore + 1);
-
-    return {
-      symbol,
-      setup_type: 'WAVE_LONG',
-      entry_price: price,
-      stop_price: price - riskAmount,
-      target_price: price + riskAmount * 2,
-      thesis: `Wave long — ${longReason}, RSI ${currentRsi.toFixed(0)}, Vol ${volumeRatio.toFixed(1)}x`,
-      entry_quality_score: longScore,
-      market_regime: 'trending',
-    };
+  // +1: Last candle was green
+  if (barMove > 0) {
+    longPoints += 1;
+    longReasons.push('green candle');
   }
 
-  // ============ SHORT TRIGGERS ============
-  let shortReason: string | null = null;
-  let shortScore = 0;
+  // +1: 2-bar momentum (last 2 candles moving up)
+  if (latest.close > prev.close && prev.close > prev2.close) {
+    longPoints += 1;
+    longReasons.push('momentum streak');
+  }
 
-  // Trigger 1: EMA crossover down
+  // -2: RSI overbought — too late to enter
+  if (currentRsi > 70) {
+    longPoints -= 2;
+  }
+
+  // ============ CONFLUENCE SCORING: SHORT ============
+  let shortPoints = 0;
+  const shortReasons: string[] = [];
+
   if (fastPrev >= slowPrev && fastNow < slowNow) {
-    shortReason = `EMA8 crossed below EMA21`;
-    shortScore = 7;
+    shortPoints += 2;
+    shortReasons.push('EMA cross down');
   }
 
-  // Trigger 2: Strong bearish candle (>0.3% move down)
-  if (!shortReason && barMove < -0.003) {
-    shortReason = `Strong bearish candle (${(barMove * 100).toFixed(2)}%)`;
-    shortScore = 5;
+  if (fastNow < slowNow) {
+    shortPoints += 1;
+    shortReasons.push('EMA trend down');
   }
 
-  // Trigger 3: VWAP rejection — price hit VWAP from below and rejected
-  if (!shortReason && prev.high >= vwap * 0.999 && latest.close < vwap && latest.close < prev.close) {
-    shortReason = `VWAP rejection at $${vwap.toFixed(0)}`;
-    shortScore = 6;
+  if (price < vwap) {
+    shortPoints += 1;
+    shortReasons.push('below VWAP');
   }
 
-  // Trigger 4: RSI reversal from overbought
-  if (!shortReason && currentRsi < 65 && currentRsi > 50 && rsi(bars.slice(0, -1)) > 65) {
-    shortReason = `RSI reversal from overbought (${currentRsi.toFixed(0)})`;
-    shortScore = 6;
+  if (currentRsi > 35 && currentRsi < 60) {
+    shortPoints += 1;
+    shortReasons.push(`RSI ${currentRsi.toFixed(0)}`);
   }
 
-  // Trigger 5: 3-bar momentum streak down
-  if (!shortReason && latest.close < prev.close && prev.close < prev2.close && barMove < 0 && prevMove < 0) {
-    shortReason = `3-bar bearish momentum streak`;
-    shortScore = 5;
+  if (volumeRatio > 1.0) {
+    shortPoints += 1;
+    shortReasons.push(`vol ${volumeRatio.toFixed(1)}x`);
   }
 
-  // Fire short if we have a reason and RSI isn't oversold
-  if (shortReason && currentRsi > 25) {
-    if (price < vwap) shortScore = Math.min(10, shortScore + 1);
-    if (fastNow < slowNow) shortScore = Math.min(10, shortScore + 1);
-    if (volumeRatio > 1) shortScore = Math.min(10, shortScore + 1);
-
-    return {
-      symbol,
-      setup_type: 'WAVE_SHORT',
-      entry_price: price,
-      stop_price: price + riskAmount,
-      target_price: price - riskAmount * 2,
-      thesis: `Wave short — ${shortReason}, RSI ${currentRsi.toFixed(0)}, Vol ${volumeRatio.toFixed(1)}x`,
-      entry_quality_score: shortScore,
-      market_regime: 'trending',
-    };
+  if (barMove < 0) {
+    shortPoints += 1;
+    shortReasons.push('red candle');
   }
 
-  return null;
+  if (latest.close < prev.close && prev.close < prev2.close) {
+    shortPoints += 1;
+    shortReasons.push('momentum streak');
+  }
+
+  if (currentRsi < 30) {
+    shortPoints -= 2;
+  }
+
+  // ============ DECISION ============
+  // Need at least 3 confluence points to trade
+  const ENTRY_THRESHOLD = 3;
+
+  // Pick the stronger direction
+  const goLong = longPoints >= ENTRY_THRESHOLD && longPoints > shortPoints;
+  const goShort = shortPoints >= ENTRY_THRESHOLD && shortPoints > longPoints;
+
+  if (!goLong && !goShort) return null;
+
+  const direction = goLong ? 'WAVE_LONG' : 'WAVE_SHORT';
+  const points = goLong ? longPoints : shortPoints;
+  const reasons = goLong ? longReasons : shortReasons;
+
+  // ============ LEARNING: check recent performance ============
+  const history = await getRecentWinRate(direction);
+
+  // If this setup has lost 3+ in a row, tighten the threshold — need extra confluence
+  if (history.losses >= 3 && history.wins === 0) {
+    if (points < ENTRY_THRESHOLD + 2) return null; // need 5+ points if on a losing streak
+  }
+
+  // If winning streak, slightly loosen risk (wider target)
+  const onWinStreak = history.wins >= 3 && history.losses <= 1;
+
+  // ============ RISK MANAGEMENT ============
+  // Base risk: 0.3% of price (conservative). Widen to 0.5% if on win streak.
+  const riskPct = onWinStreak ? 0.005 : 0.003;
+  const riskAmount = price * riskPct;
+
+  // Reward: 2:1 base, 2.5:1 if strong confluence or win streak
+  const rrRatio = (points >= 5 || onWinStreak) ? 2.5 : 2;
+
+  const entry = price;
+  const stop = goLong ? entry - riskAmount : entry + riskAmount;
+  const target = goLong ? entry + riskAmount * rrRatio : entry - riskAmount * rrRatio;
+
+  const historyNote = history.wins + history.losses > 0
+    ? ` | Track: ${history.wins}W/${history.losses}L`
+    : ' | First trade';
+
+  return {
+    symbol,
+    setup_type: direction as 'WAVE_LONG' | 'WAVE_SHORT',
+    entry_price: entry,
+    stop_price: stop,
+    target_price: target,
+    thesis: `${direction === 'WAVE_LONG' ? 'Long' : 'Short'} — ${reasons.join(', ')} (${points} pts)${historyNote}`,
+    entry_quality_score: Math.min(10, points),
+    market_regime: 'trending',
+  };
 }
 
 /**
- * Get current wave analysis for display (even when no signal fires).
+ * Wave analysis for display — always returned even with no trade signal.
  */
 export function analyzeWave(bars: PriceBar[], vwap: number): {
   trend: 'bullish' | 'bearish' | 'neutral';
