@@ -1,7 +1,7 @@
 import { getServiceClient } from '../lib/supabase';
 import type { SetupSignal, Trade } from '../lib/types';
 import { log } from './logger';
-import { sendEntryAlert, sendExitAlert } from './telegram';
+// Telegram alerts disabled — user wants morning briefs only
 
 export async function openPaperTrade(signal: SetupSignal): Promise<Trade | null> {
   const supabase = getServiceClient();
@@ -39,7 +39,7 @@ export async function openPaperTrade(signal: SetupSignal): Promise<Trade | null>
     entry: signal.entry_price,
   });
 
-  await sendEntryAlert(signal);
+  // Log trade entry — no Telegram alert (user wants morning briefs only)
   return data as Trade;
 }
 
@@ -137,7 +137,7 @@ export async function checkAndCloseTrades(
         pnl: pnlDollars,
       });
 
-      await sendExitAlert(closedTrade);
+      // No Telegram alert — user wants morning briefs only
     }
   }
 }

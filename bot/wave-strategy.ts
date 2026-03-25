@@ -193,8 +193,8 @@ export async function detectWave(input: WaveInput): Promise<SetupSignal | null> 
   }
 
   // ============ DECISION ============
-  // Need at least 3 confluence points to trade
-  const ENTRY_THRESHOLD = 3;
+  // Need at least 2 confluence points to trade (lowered for more action)
+  const ENTRY_THRESHOLD = 2;
 
   // Pick the stronger direction
   const goLong = longPoints >= ENTRY_THRESHOLD && longPoints > shortPoints;
@@ -218,8 +218,8 @@ export async function detectWave(input: WaveInput): Promise<SetupSignal | null> 
   const onWinStreak = history.wins >= 3 && history.losses <= 1;
 
   // ============ RISK MANAGEMENT ============
-  // Base risk: 0.3% of price (conservative). Widen to 0.5% if on win streak.
-  const riskPct = onWinStreak ? 0.005 : 0.003;
+  // Base risk: 0.8% of price. Widen to 1.2% if on win streak.
+  const riskPct = onWinStreak ? 0.012 : 0.008;
   const riskAmount = price * riskPct;
 
   // Reward: 2:1 base, 2.5:1 if strong confluence or win streak

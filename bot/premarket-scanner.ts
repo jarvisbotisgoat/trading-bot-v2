@@ -1,5 +1,4 @@
 import { log } from './logger';
-import { sendTelegramMessage } from './telegram';
 import { FULL_SCAN_LIST } from './watchlist';
 
 /**
@@ -175,6 +174,6 @@ export async function runPremarketScan(): Promise<void> {
 
   msg += `\n⏰ Next scan in 30 min. Market opens 6:30 AM PT.`;
 
-  await sendTelegramMessage(msg);
-  await log('info', `Premarket scan: found ${movers.length} movers, sent alert`);
+  // Log only — no Telegram spam. Morning briefing is the only scheduled message.
+  await log('info', `Premarket scan: found ${movers.length} movers`, { movers: movers.map(m => m.symbol) });
 }
