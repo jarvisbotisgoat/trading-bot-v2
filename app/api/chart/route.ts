@@ -1,12 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import yahooFinance from 'yahoo-finance2';
+import { fetchCryptoBars } from '@/bot/crypto-fetch';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
-  const symbol = req.nextUrl.searchParams.get('symbol') || 'TSLA';
+  const symbol = req.nextUrl.searchParams.get('symbol') || 'BTC-USD';
+  const isCrypto = symbol.endsWith('-USD');
 
   try {
+    if (isCrypto) {
+      // Use robust crypto fetcher
+      const bars = await fetchCryptoBars(symbol);
+      return NextResponse.json(bars);
+    }
+
+    // Stock path
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result: any = await yahooFinance.chart(symbol, {
       period1: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],

@@ -2,11 +2,13 @@ import yahooFinance from 'yahoo-finance2';
 import { getServiceClient } from '../lib/supabase';
 import type { PriceBar } from '../lib/types';
 import { detectSetups } from './strategy';
+import { detectWave, analyzeWave } from './wave-strategy';
 import { openPaperTrade, checkAndCloseTrades } from './executor';
 import { log } from './logger';
-import { getActiveWatchlist, displaySymbol } from './market-hours';
+import { getActiveWatchlist, displaySymbol, isMarketOpen } from './market-hours';
+import { fetchCryptoBars } from './crypto-fetch';
 
-async function fetchBars(symbol: string): Promise<PriceBar[]> {
+async function fetchStockBars(symbol: string): Promise<PriceBar[]> {
   try {
     const result = await yahooFinance.chart(symbol, {
       period1: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0],
@@ -29,7 +31,7 @@ async function fetchBars(symbol: string): Promise<PriceBar[]> {
         volume: q.volume || 0,
       }));
   } catch (err) {
-    await log('warn', `Failed to fetch bars for ${displaySymbol(symbol)}`, { error: String(err) });
+    await log('warn', `Failed to fetch bars for ${symbol}`, { error: String(err) });
     return [];
   }
 }
@@ -62,6 +64,12 @@ export interface ScanResult {
   signals_found: number;
   skipped: boolean;
   signal_type?: string;
+  wave_analysis?: {
+    trend: string;
+    rsi: number;
+    emaSpread: number;
+    volumeRatio: number;
+  };
 }
 
 interface PlanSetup {
@@ -81,7 +89,6 @@ async function savePlannedSetups(setups: PlanSetup[]): Promise<void> {
   tomorrow.setDate(tomorrow.getDate() + 1);
   const date = tomorrow.toISOString().split('T')[0];
 
-  // Pad to 3 slots
   while (setups.length < 3) {
     setups.push({ symbol: '', thesis: '', entryZone: '', stop: '', target: '', invalidation: '' });
   }
@@ -104,14 +111,16 @@ async function savePlannedSetups(setups: PlanSetup[]): Promise<void> {
     },
     { onConflict: 'date' }
   );
-
-  await log('info', `Saved ${Math.min(setups.filter(s => s.symbol).length, 3)} trade plans for tomorrow`, { date });
 }
 
 export async function runScan(): Promise<ScanResult[]> {
   const { symbols: WATCHLIST, mode } = getActiveWatchlist();
+  const isCrypto = mode === 'crypto';
 
-  await log('info', `Bot scan started — ${mode} mode`, { watchlist: WATCHLIST.map(displaySymbol), mode });
+  await log('info', `Bot scan started — ${mode} mode`, {
+    watchlist: WATCHLIST.map(displaySymbol),
+    mode,
+  });
 
   const openSymbols = await getOpenSymbols();
   const currentPrices: Record<string, number> = {};
@@ -121,7 +130,9 @@ export async function runScan(): Promise<ScanResult[]> {
   for (const symbol of WATCHLIST) {
     const display = displaySymbol(symbol);
     try {
-      const bars = await fetchBars(symbol);
+      // Use crypto-specific fetcher for crypto symbols
+      const bars = isCrypto ? await fetchCryptoBars(symbol) : await fetchStockBars(symbol);
+
       if (bars.length === 0) {
         results.push({ symbol, price: 0, bars_count: 0, vwap: 0, signals_found: 0, skipped: true });
         await log('info', `Scanning ${display}: no data`, { symbol });
@@ -133,6 +144,9 @@ export async function runScan(): Promise<ScanResult[]> {
       const vwap = computeVWAP(bars);
       const prevHod = Math.max(...bars.slice(0, -1).map((b) => b.high));
 
+      // Get wave analysis for BTC (always show trend info)
+      const waveInfo = isCrypto ? analyzeWave(bars, vwap) : undefined;
+
       if (openSymbols.has(symbol)) {
         results.push({
           symbol,
@@ -141,6 +155,7 @@ export async function runScan(): Promise<ScanResult[]> {
           vwap,
           signals_found: 0,
           skipped: true,
+          wave_analysis: waveInfo,
         });
         await log('info', `Scanning ${display}: $${latest.close.toFixed(2)} — skipped (open trade)`, {
           symbol,
@@ -149,7 +164,14 @@ export async function runScan(): Promise<ScanResult[]> {
         continue;
       }
 
-      const signals = detectSetups({ symbol, bars, vwap, prevHod });
+      // For crypto: use wave strategy. For stocks: use standard setups.
+      let signals;
+      if (isCrypto) {
+        const wave = detectWave({ symbol, bars, vwap });
+        signals = wave ? [wave] : [];
+      } else {
+        signals = detectSetups({ symbol, bars, vwap, prevHod });
+      }
 
       results.push({
         symbol,
@@ -159,6 +181,7 @@ export async function runScan(): Promise<ScanResult[]> {
         signals_found: signals.length,
         skipped: false,
         signal_type: signals.length > 0 ? signals[0].setup_type : undefined,
+        wave_analysis: waveInfo,
       });
 
       if (signals.length > 0) {
@@ -171,35 +194,21 @@ export async function runScan(): Promise<ScanResult[]> {
         });
         await openPaperTrade(sig);
 
-        // Save as a planned setup for tomorrow
         plannedSetups.push({
           symbol: display,
           thesis: sig.thesis,
           entryZone: `$${(sig.entry_price * 0.998).toFixed(2)}–$${(sig.entry_price * 1.002).toFixed(2)}`,
           stop: `$${sig.stop_price.toFixed(2)}`,
           target: `$${sig.target_price.toFixed(2)}`,
-          invalidation: `Break below $${sig.stop_price.toFixed(2)}`,
+          invalidation: `Break ${sig.target_price > sig.entry_price ? 'below' : 'above'} $${sig.stop_price.toFixed(2)}`,
         });
       } else {
         await log('info', `Scanning ${display}: $${latest.close.toFixed(2)} — no setup`, {
           symbol,
           price: latest.close,
           vwap,
+          wave: waveInfo,
         });
-
-        // Even without a signal, if price is near VWAP, note it as a potential plan
-        const distFromVwap = Math.abs(latest.close - vwap) / vwap;
-        if (distFromVwap < 0.005 && plannedSetups.length < 3) {
-          const risk = latest.close * 0.01; // 1% risk
-          plannedSetups.push({
-            symbol: display,
-            thesis: `Near VWAP ($${vwap.toFixed(2)}) — watch for reclaim setup at open`,
-            entryZone: `$${(vwap * 0.998).toFixed(2)}–$${(vwap * 1.002).toFixed(2)}`,
-            stop: `$${(latest.close - risk).toFixed(2)}`,
-            target: `$${(latest.close + risk * 2).toFixed(2)}`,
-            invalidation: `Fails to hold VWAP on volume`,
-          });
-        }
       }
     } catch (err) {
       await log('error', `Error scanning ${display}`, { error: String(err) });
@@ -208,15 +217,12 @@ export async function runScan(): Promise<ScanResult[]> {
   }
 
   await checkAndCloseTrades(currentPrices);
-
-  // Save planned setups for tomorrow's plan page
   await savePlannedSetups(plannedSetups);
 
   await log('info', `Bot scan completed — ${mode} mode`, {
     scanned: results.length,
     signals: results.filter((r) => r.signals_found > 0).length,
     mode,
-    plans_generated: plannedSetups.filter(s => s.symbol).length,
   });
 
   return results;

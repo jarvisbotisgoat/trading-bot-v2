@@ -17,6 +17,12 @@ interface ScanResult {
   signals_found: number;
   skipped: boolean;
   signal_type?: string;
+  wave_analysis?: {
+    trend: string;
+    rsi: number;
+    emaSpread: number;
+    volumeRatio: number;
+  };
 }
 
 interface LiveFeedProps {
@@ -61,7 +67,7 @@ export function LiveFeed({ isRunning, onScanComplete }: LiveFeedProps) {
   const [lines, setLines] = useState<FeedLine[]>([]);
   const [scanning, setScanning] = useState(false);
   const [lastScan, setLastScan] = useState<string | null>(null);
-  const [countdown, setCountdown] = useState(60);
+  const [countdown, setCountdown] = useState(30);
   const feedRef = useRef<HTMLDivElement>(null);
   const scanInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const countdownInterval = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -73,7 +79,7 @@ export function LiveFeed({ isRunning, onScanComplete }: LiveFeedProps) {
 
   const triggerScan = useCallback(async () => {
     setScanning(true);
-    setCountdown(60);
+    setCountdown(30);
     addLine('Scan started — fetching market data...', 'scan');
 
     try {
@@ -84,14 +90,20 @@ export function LiveFeed({ isRunning, onScanComplete }: LiveFeedProps) {
         const results: ScanResult[] = data.results;
         for (const r of results) {
           const sym = displaySymbol(r.symbol);
+          const wave = r.wave_analysis;
+          const waveTag = wave
+            ? ` [${wave.trend.toUpperCase()} RSI:${wave.rsi.toFixed(0)} Vol:${wave.volumeRatio.toFixed(1)}x]`
+            : '';
+
           if (r.price === 0) {
             addLine(`${sym}: no data available`, 'info');
           } else if (r.skipped) {
-            addLine(`${sym}: $${r.price.toFixed(2)} — skipped (open trade)`, 'info');
+            addLine(`${sym}: $${r.price.toFixed(2)} — monitoring open trade${waveTag}`, 'info');
           } else if (r.signals_found > 0) {
-            addLine(`${sym}: $${r.price.toFixed(2)} — SIGNAL: ${r.signal_type} (VWAP: $${r.vwap.toFixed(2)})`, 'signal');
+            const direction = r.signal_type?.includes('SHORT') ? 'SHORT' : 'LONG';
+            addLine(`${sym}: $${r.price.toFixed(2)} — ${direction} SIGNAL: ${r.signal_type}${waveTag}`, 'signal');
           } else {
-            addLine(`${sym}: $${r.price.toFixed(2)} — no setup (VWAP: $${r.vwap.toFixed(2)})`, 'info');
+            addLine(`${sym}: $${r.price.toFixed(2)} — watching${waveTag}`, 'info');
           }
         }
         const signals = results.filter(r => r.signals_found > 0).length;
@@ -125,14 +137,14 @@ export function LiveFeed({ isRunning, onScanComplete }: LiveFeedProps) {
   useEffect(() => {
     if (isRunning) {
       triggerScan();
-      scanInterval.current = setInterval(triggerScan, 60000);
+      scanInterval.current = setInterval(triggerScan, 30000);
     } else {
       if (scanInterval.current) {
         clearInterval(scanInterval.current);
         scanInterval.current = null;
       }
       setScanning(false);
-      setCountdown(60);
+      setCountdown(30);
     }
     return () => {
       if (scanInterval.current) clearInterval(scanInterval.current);

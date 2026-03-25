@@ -1,7 +1,7 @@
 export type TradeStatus = 'open' | 'closed';
 export type TradeOutcome = 'win' | 'loss' | 'breakeven' | null;
 export type BotLogLevel = 'info' | 'warn' | 'error';
-export type SetupType = 'ORB' | 'VWAP_RECLAIM' | 'HOD_BREAK';
+export type SetupType = 'ORB' | 'VWAP_RECLAIM' | 'HOD_BREAK' | 'WAVE_LONG' | 'WAVE_SHORT';
 
 export interface Trade {
   id: string;
