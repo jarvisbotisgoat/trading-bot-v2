@@ -162,7 +162,10 @@ export default function DashboardPage() {
         </div>
         <div className="flex items-center gap-3">
           <BotToggle isRunning={botRunning} onToggle={setBotRunning} />
-          <BotStatusBadge status={botStatus} />
+          <BotStatusBadge status={{
+            ...botStatus,
+            status: botRunning ? 'active' : botStatus.status,
+          }} />
         </div>
       </div>
 
