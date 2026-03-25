@@ -4,8 +4,7 @@ import type { PriceBar } from '../lib/types';
 import { detectSetups } from './strategy';
 import { openPaperTrade, checkAndCloseTrades } from './executor';
 import { log } from './logger';
-
-const WATCHLIST = (process.env.WATCHLIST || 'TSLA,NVDA,SPY,AAPL,AMZN').split(',');
+import { getActiveWatchlist, displaySymbol } from './market-hours';
 
 async function fetchBars(symbol: string): Promise<PriceBar[]> {
   try {
@@ -30,7 +29,7 @@ async function fetchBars(symbol: string): Promise<PriceBar[]> {
         volume: q.volume || 0,
       }));
   } catch (err) {
-    await log('warn', `Failed to fetch bars for ${symbol}`, { error: String(err) });
+    await log('warn', `Failed to fetch bars for ${displaySymbol(symbol)}`, { error: String(err) });
     return [];
   }
 }
@@ -65,19 +64,67 @@ export interface ScanResult {
   signal_type?: string;
 }
 
+interface PlanSetup {
+  symbol: string;
+  thesis: string;
+  entryZone: string;
+  stop: string;
+  target: string;
+  invalidation: string;
+}
+
+async function savePlannedSetups(setups: PlanSetup[]): Promise<void> {
+  if (setups.length === 0) return;
+
+  const supabase = getServiceClient();
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const date = tomorrow.toISOString().split('T')[0];
+
+  // Pad to 3 slots
+  while (setups.length < 3) {
+    setups.push({ symbol: '', thesis: '', entryZone: '', stop: '', target: '', invalidation: '' });
+  }
+
+  const planData = {
+    slots: setups.slice(0, 3),
+    holdAllDay: setups.length > 0 ? `${setups[0].symbol} — strongest signal` : '',
+    swingWindow: '6:30–10:00 AM PT',
+  };
+
+  await supabase.from('daily_summary').upsert(
+    {
+      date,
+      notes: JSON.stringify(planData),
+      total_pnl: 0,
+      win_count: 0,
+      loss_count: 0,
+      win_rate: 0,
+      max_drawdown: 0,
+    },
+    { onConflict: 'date' }
+  );
+
+  await log('info', `Saved ${Math.min(setups.filter(s => s.symbol).length, 3)} trade plans for tomorrow`, { date });
+}
+
 export async function runScan(): Promise<ScanResult[]> {
-  await log('info', 'Bot scan started', { watchlist: WATCHLIST });
+  const { symbols: WATCHLIST, mode } = getActiveWatchlist();
+
+  await log('info', `Bot scan started — ${mode} mode`, { watchlist: WATCHLIST.map(displaySymbol), mode });
 
   const openSymbols = await getOpenSymbols();
   const currentPrices: Record<string, number> = {};
   const results: ScanResult[] = [];
+  const plannedSetups: PlanSetup[] = [];
 
   for (const symbol of WATCHLIST) {
+    const display = displaySymbol(symbol);
     try {
       const bars = await fetchBars(symbol);
       if (bars.length === 0) {
         results.push({ symbol, price: 0, bars_count: 0, vwap: 0, signals_found: 0, skipped: true });
-        await log('info', `Scanning ${symbol}: no data`, { symbol });
+        await log('info', `Scanning ${display}: no data`, { symbol });
         continue;
       }
 
@@ -95,7 +142,7 @@ export async function runScan(): Promise<ScanResult[]> {
           signals_found: 0,
           skipped: true,
         });
-        await log('info', `Scanning ${symbol}: $${latest.close.toFixed(2)} — skipped (open trade)`, {
+        await log('info', `Scanning ${display}: $${latest.close.toFixed(2)} — skipped (open trade)`, {
           symbol,
           price: latest.close,
         });
@@ -115,30 +162,61 @@ export async function runScan(): Promise<ScanResult[]> {
       });
 
       if (signals.length > 0) {
-        await log('info', `Scanning ${symbol}: $${latest.close.toFixed(2)} — SIGNAL: ${signals[0].setup_type}`, {
+        const sig = signals[0];
+        await log('info', `Scanning ${display}: $${latest.close.toFixed(2)} — SIGNAL: ${sig.setup_type}`, {
           symbol,
           price: latest.close,
-          setup: signals[0].setup_type,
-          entry: signals[0].entry_price,
+          setup: sig.setup_type,
+          entry: sig.entry_price,
         });
-        await openPaperTrade(signals[0]);
+        await openPaperTrade(sig);
+
+        // Save as a planned setup for tomorrow
+        plannedSetups.push({
+          symbol: display,
+          thesis: sig.thesis,
+          entryZone: `$${(sig.entry_price * 0.998).toFixed(2)}–$${(sig.entry_price * 1.002).toFixed(2)}`,
+          stop: `$${sig.stop_price.toFixed(2)}`,
+          target: `$${sig.target_price.toFixed(2)}`,
+          invalidation: `Break below $${sig.stop_price.toFixed(2)}`,
+        });
       } else {
-        await log('info', `Scanning ${symbol}: $${latest.close.toFixed(2)} — no setup`, {
+        await log('info', `Scanning ${display}: $${latest.close.toFixed(2)} — no setup`, {
           symbol,
           price: latest.close,
           vwap,
         });
+
+        // Even without a signal, if price is near VWAP, note it as a potential plan
+        const distFromVwap = Math.abs(latest.close - vwap) / vwap;
+        if (distFromVwap < 0.005 && plannedSetups.length < 3) {
+          const risk = latest.close * 0.01; // 1% risk
+          plannedSetups.push({
+            symbol: display,
+            thesis: `Near VWAP ($${vwap.toFixed(2)}) — watch for reclaim setup at open`,
+            entryZone: `$${(vwap * 0.998).toFixed(2)}–$${(vwap * 1.002).toFixed(2)}`,
+            stop: `$${(latest.close - risk).toFixed(2)}`,
+            target: `$${(latest.close + risk * 2).toFixed(2)}`,
+            invalidation: `Fails to hold VWAP on volume`,
+          });
+        }
       }
     } catch (err) {
-      await log('error', `Error scanning ${symbol}`, { error: String(err) });
+      await log('error', `Error scanning ${display}`, { error: String(err) });
       results.push({ symbol, price: 0, bars_count: 0, vwap: 0, signals_found: 0, skipped: true });
     }
   }
 
   await checkAndCloseTrades(currentPrices);
-  await log('info', 'Bot scan completed', {
+
+  // Save planned setups for tomorrow's plan page
+  await savePlannedSetups(plannedSetups);
+
+  await log('info', `Bot scan completed — ${mode} mode`, {
     scanned: results.length,
     signals: results.filter((r) => r.signals_found > 0).length,
+    mode,
+    plans_generated: plannedSetups.filter(s => s.symbol).length,
   });
 
   return results;

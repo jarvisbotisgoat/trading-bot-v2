@@ -6,6 +6,10 @@ interface WatchlistStripProps {
   onSelect: (symbol: string) => void;
 }
 
+function displaySymbol(s: string): string {
+  return s.replace('-USD', '');
+}
+
 export function WatchlistStrip({ symbols, activeSymbol, onSelect }: WatchlistStripProps) {
   return (
     <div className="flex gap-2 overflow-x-auto pb-1">
@@ -19,7 +23,7 @@ export function WatchlistStrip({ symbols, activeSymbol, onSelect }: WatchlistStr
               : 'bg-[#21262d]/50 text-[#8b949e] border border-transparent hover:text-white'
           }`}
         >
-          ${symbol}
+          ${displaySymbol(symbol)}
         </button>
       ))}
     </div>

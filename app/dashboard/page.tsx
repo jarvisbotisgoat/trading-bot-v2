@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import type { Trade, BotStatus, DailySummary } from '@/lib/types';
+import type { Trade, BotStatus, DailySummary, PriceBar } from '@/lib/types';
 import { StatTile } from '@/components/ui/stat-tile';
 import { Card } from '@/components/ui/card';
 import { BotStatusBadge } from '@/components/dashboard/bot-status-badge';
@@ -13,7 +13,27 @@ import { LiveFeed } from '@/components/dashboard/live-feed';
 import { CandlestickChart } from '@/components/charts/candlestick-chart';
 import { CandlestickData, Time } from 'lightweight-charts';
 
-const WATCHLIST = ['TSLA', 'NVDA', 'SPY', 'AAPL', 'AMZN'];
+const STOCK_WATCHLIST = ['TSLA', 'NVDA', 'SPY', 'AAPL', 'AMZN'];
+const CRYPTO_WATCHLIST = ['BTC-USD', 'ETH-USD', 'SOL-USD', 'DOGE-USD', 'AVAX-USD'];
+
+const STARTING_BALANCE = 100_000;
+
+function isMarketOpenClient(): boolean {
+  const now = new Date();
+  const day = now.getUTCDay();
+  if (day === 0 || day === 6) return false;
+  const month = now.getUTCMonth();
+  const isDST = month >= 2 && month <= 10;
+  const etOffset = isDST ? 4 : 5;
+  const etHour = now.getUTCHours() - etOffset;
+  const etMin = now.getUTCMinutes();
+  const etTime = etHour * 60 + etMin;
+  return etTime >= 570 && etTime < 960;
+}
+
+function displaySymbol(s: string): string {
+  return s.replace('-USD', '');
+}
 
 export default function DashboardPage() {
   const [botStatus, setBotStatus] = useState<BotStatus>({
@@ -25,8 +45,61 @@ export default function DashboardPage() {
   const [openTrades, setOpenTrades] = useState<Trade[]>([]);
   const [todaySummary, setTodaySummary] = useState<DailySummary | null>(null);
   const [equityData, setEquityData] = useState<{ time: string; value: number }[]>([]);
-  const [activeSymbol, setActiveSymbol] = useState('TSLA');
-  const [chartData] = useState<CandlestickData<Time>[]>([]);
+  const [marketOpen, setMarketOpen] = useState(isMarketOpenClient());
+  const watchlist = marketOpen ? STOCK_WATCHLIST : CRYPTO_WATCHLIST;
+  const [activeSymbol, setActiveSymbol] = useState(watchlist[0]);
+  const [chartData, setChartData] = useState<CandlestickData<Time>[]>([]);
+  const [chartLoading, setChartLoading] = useState(false);
+
+  // Check market status periodically
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const open = isMarketOpenClient();
+      setMarketOpen(open);
+    }, 60000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // When market mode changes, switch active symbol to first in new list
+  useEffect(() => {
+    const list = marketOpen ? STOCK_WATCHLIST : CRYPTO_WATCHLIST;
+    if (!list.includes(activeSymbol)) {
+      setActiveSymbol(list[0]);
+    }
+  }, [marketOpen, activeSymbol]);
+
+  // Fetch chart data when activeSymbol changes
+  useEffect(() => {
+    let cancelled = false;
+    async function loadChart() {
+      setChartLoading(true);
+      try {
+        const res = await fetch(`/api/chart?symbol=${encodeURIComponent(activeSymbol)}`);
+        if (res.ok && !cancelled) {
+          const bars: PriceBar[] = await res.json();
+          if (Array.isArray(bars) && bars.length > 0) {
+            setChartData(
+              bars.map((b) => ({
+                time: b.time as Time,
+                open: b.open,
+                high: b.high,
+                low: b.low,
+                close: b.close,
+              }))
+            );
+          } else {
+            setChartData([]);
+          }
+        }
+      } catch {
+        if (!cancelled) setChartData([]);
+      } finally {
+        if (!cancelled) setChartLoading(false);
+      }
+    }
+    loadChart();
+    return () => { cancelled = true; };
+  }, [activeSymbol]);
 
   const fetchData = useCallback(async () => {
     try {
@@ -71,12 +144,22 @@ export default function DashboardPage() {
   const todayPnl = todaySummary?.total_pnl ?? 0;
   const winRate = todaySummary?.win_rate ?? 0;
   const maxDrawdown = todaySummary?.max_drawdown ?? 0;
+  const currentBalance = STARTING_BALANCE + todayPnl;
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Dashboard</h1>
+        <div>
+          <h1 className="text-2xl font-bold">Dashboard</h1>
+          <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+            marketOpen
+              ? 'bg-[#00d4aa]/10 text-[#00d4aa] border border-[#00d4aa]/30'
+              : 'bg-purple-500/10 text-purple-400 border border-purple-500/30'
+          }`}>
+            {marketOpen ? 'Market Open — Stocks' : 'After Hours — Crypto'}
+          </span>
+        </div>
         <div className="flex items-center gap-3">
           <BotToggle isRunning={botRunning} onToggle={setBotRunning} />
           <BotStatusBadge status={botStatus} />
@@ -85,13 +168,18 @@ export default function DashboardPage() {
 
       {/* Watchlist */}
       <WatchlistStrip
-        symbols={WATCHLIST}
+        symbols={watchlist}
         activeSymbol={activeSymbol}
         onSelect={setActiveSymbol}
       />
 
       {/* Stat tiles */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+        <StatTile
+          label="Balance"
+          value={`$${currentBalance.toLocaleString()}`}
+          color="white"
+        />
         <StatTile
           label="Today P/L"
           value={`${todayPnl >= 0 ? '+' : ''}$${todayPnl.toFixed(0)}`}
@@ -132,13 +220,18 @@ export default function DashboardPage() {
       {/* Chart */}
       <Card>
         <h2 className="text-sm text-[#8b949e] uppercase tracking-wider mb-3">
-          ${activeSymbol} — Intraday
+          ${displaySymbol(activeSymbol)} — Intraday
         </h2>
-        {chartData.length > 0 ? (
+        {chartLoading ? (
+          <div className="h-[400px] flex items-center justify-center text-[#484f58] text-sm">
+            <span className="h-4 w-4 animate-spin rounded-full border-2 border-[#484f58] border-t-transparent mr-2" />
+            Loading chart data...
+          </div>
+        ) : chartData.length > 0 ? (
           <CandlestickChart data={chartData} />
         ) : (
-          <div className="h-[400px] flex items-center justify-center text-[#8b949e] text-sm">
-            Connect Supabase to load chart data
+          <div className="h-[400px] flex items-center justify-center text-[#484f58] text-sm">
+            No chart data available for {displaySymbol(activeSymbol)}
           </div>
         )}
       </Card>
