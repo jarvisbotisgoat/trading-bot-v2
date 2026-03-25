@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/morning-briefing",
       "schedule": "30 12 * * *"
+    },
+    {
+      "path": "/api/cron/premarket-scan",
+      "schedule": "0,30 12,13,14 * * 1-5"
     }
   ]
 }
