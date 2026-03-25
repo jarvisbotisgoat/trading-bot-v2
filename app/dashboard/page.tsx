@@ -189,6 +189,16 @@ export default function DashboardPage() {
           </span>
         </div>
         <div className="flex items-center gap-3">
+          <button
+            onClick={async () => {
+              if (!confirm('Reset bot? This wipes ALL trades and starts fresh at $100k.')) return;
+              await fetch('/api/bot/cleanup', { method: 'POST' });
+              fetchData();
+            }}
+            className="text-xs px-3 py-1.5 rounded bg-[#21262d] text-[#8b949e] border border-[#30363d] hover:text-[#ff4d4f] hover:border-[#ff4d4f]/30 transition-colors"
+          >
+            Reset
+          </button>
           <BotToggle isRunning={botRunning} onToggle={setBotRunning} />
           <BotStatusBadge status={{
             ...botStatus,
@@ -269,21 +279,9 @@ export default function DashboardPage() {
 
       {/* Open Trades */}
       <Card>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm text-[#8b949e] uppercase tracking-wider">
-            Open Trades ({openTrades.length})
-          </h2>
-          <button
-            onClick={async () => {
-              if (!confirm('Reset bot? This wipes ALL trades and starts fresh at $100k.')) return;
-              await fetch('/api/bot/cleanup', { method: 'POST' });
-              fetchData();
-            }}
-            className="text-xs px-3 py-1 rounded bg-[#ff4d4f]/10 text-[#ff4d4f] border border-[#ff4d4f]/30 hover:bg-[#ff4d4f]/20 transition-colors"
-          >
-            Reset Bot
-          </button>
-        </div>
+        <h2 className="text-sm text-[#8b949e] uppercase tracking-wider mb-3">
+          Open Trades ({openTrades.length})
+        </h2>
         <OpenTradesTable trades={openTrades} currentPrices={currentPrices} />
       </Card>
     </div>
