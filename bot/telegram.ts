@@ -28,6 +28,8 @@ export async function sendEntryAlert(signal: SetupSignal) {
     ORB: 'Opening Range Breakout',
     VWAP_RECLAIM: 'VWAP Reclaim',
     HOD_BREAK: 'HOD Break',
+    WAVE_LONG: 'Wave Long (Crypto)',
+    WAVE_SHORT: 'Wave Short (Crypto)',
   };
 
   const message = `🟢 SIGNAL — $${signal.symbol}
@@ -81,6 +83,18 @@ ${trade.failure_reason ? `Note: ${trade.failure_reason}` : trade.notes ? `Note: 
       error: String(err),
       symbol: trade.symbol,
     });
+  }
+}
+
+export async function sendTelegramMessage(message: string) {
+  const b = getBot();
+  if (!b || !getChatId()) return;
+
+  try {
+    await b.sendMessage(getChatId(), message, { parse_mode: undefined });
+    await log('info', 'Telegram message sent');
+  } catch (err) {
+    await log('error', 'Failed to send Telegram message', { error: String(err) });
   }
 }
 
