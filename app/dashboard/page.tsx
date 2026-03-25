@@ -61,6 +61,7 @@ export default function DashboardPage() {
   const [activeSymbol, setActiveSymbol] = useState(watchlist[0]);
   const [chartData, setChartData] = useState<CandlestickData<Time>[]>([]);
   const [chartLoading, setChartLoading] = useState(false);
+  const [currentPrices, setCurrentPrices] = useState<Record<string, number>>({});
 
   // Check market status periodically
   useEffect(() => {
@@ -127,7 +128,20 @@ export default function DashboardPage() {
         const control = await controlRes.json();
         setBotRunning(control.is_running || false);
       }
-      if (tradesRes.ok) setOpenTrades(await tradesRes.json());
+      if (tradesRes.ok) {
+        const tradesData: Trade[] = await tradesRes.json();
+        setOpenTrades(tradesData);
+
+        // Fetch live prices for open trade symbols
+        const symbolSet = new Set(tradesData.map((t) => t.symbol));
+        const symbols = Array.from(symbolSet);
+        if (symbols.length > 0) {
+          try {
+            const pricesRes = await fetch(`/api/prices?symbols=${symbols.join(',')}`);
+            if (pricesRes.ok) setCurrentPrices(await pricesRes.json());
+          } catch { /* prices are optional */ }
+        }
+      }
       if (statsRes.ok) setLiveStats(await statsRes.json());
       if (summaryRes.ok) {
         const summaries: DailySummary[] = await summaryRes.json();
@@ -258,7 +272,7 @@ export default function DashboardPage() {
         <h2 className="text-sm text-[#8b949e] uppercase tracking-wider mb-3">
           Open Trades
         </h2>
-        <OpenTradesTable trades={openTrades} />
+        <OpenTradesTable trades={openTrades} currentPrices={currentPrices} />
       </Card>
     </div>
   );
