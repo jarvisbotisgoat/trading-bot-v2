@@ -14,7 +14,7 @@ import { CandlestickChart } from '@/components/charts/candlestick-chart';
 import { CandlestickData, Time } from 'lightweight-charts';
 
 const STOCK_WATCHLIST = ['TSLA', 'NVDA', 'SPY', 'AAPL', 'AMZN'];
-const CRYPTO_WATCHLIST = ['BTC-USD'];
+const CRYPTO_WATCHLIST = ['BTC-USD', 'ETH-USD', 'SOL-USD', 'XRP-USD', 'DOGE-USD', 'AVAX-USD'];
 
 const STARTING_BALANCE = 100_000;
 
