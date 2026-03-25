@@ -7,6 +7,14 @@
     {
       "path": "/api/cron/premarket-scan",
       "schedule": "0,30 12,13,14 * * 1-5"
+    },
+    {
+      "path": "/api/cron/bot-scan",
+      "schedule": "*/1 13-21 * * 1-5"
+    },
+    {
+      "path": "/api/cron/bot-scan",
+      "schedule": "*/5 21-23,0-13 * * *"
     }
   ]
 }

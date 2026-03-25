@@ -139,39 +139,8 @@ export async function runPremarketScan(): Promise<void> {
     .sort((a, b) => Math.abs(b.changePct) - Math.abs(a.changePct));
 
   if (movers.length === 0) {
-    // Quiet market — send a brief update
-    const topStocks = hits
-      .filter(h => !h.isCrypto)
-      .sort((a, b) => Math.abs(b.changePct) - Math.abs(a.changePct))
-      .slice(0, 3);
-
-    const topCrypto = hits.filter(h => h.isCrypto).slice(0, 2);
-
-    let msg = `🔍 PREMARKET CHECK-IN\n\n`;
-    msg += `Quiet morning so far — nothing moving big.\n\n`;
-
-    if (topStocks.length > 0) {
-      msg += `Top stocks:\n`;
-      for (const s of topStocks) {
-        const arrow = s.changePct >= 0 ? '🟢' : '🔴';
-        msg += `${arrow} $${s.symbol}: ${formatPrice(s.price)} (${s.changePct >= 0 ? '+' : ''}${s.changePct.toFixed(1)}%)\n`;
-      }
-      msg += `\n`;
-    }
-
-    if (topCrypto.length > 0) {
-      msg += `Crypto:\n`;
-      for (const c of topCrypto) {
-        const arrow = c.changePct >= 0 ? '🟢' : '🔴';
-        msg += `${arrow} $${c.symbol}: ${formatPrice(c.price)} (${c.changePct >= 0 ? '+' : ''}${c.changePct.toFixed(1)}%)\n`;
-      }
-      msg += `\n`;
-    }
-
-    msg += `💡 Tip: Quiet mornings can still produce good trades. Watch for the ORB (opening range breakout) in the first 15 min.\n`;
-
-    await sendTelegramMessage(msg);
-    await log('info', 'Premarket scan: quiet market, sent check-in');
+    // Quiet market — don't spam Telegram, just log it
+    await log('info', 'Premarket scan: quiet market, no movers — skipping Telegram');
     return;
   }
 
