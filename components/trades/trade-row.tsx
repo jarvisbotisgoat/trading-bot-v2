@@ -7,6 +7,16 @@ interface TradeRowProps {
   trade: Trade;
 }
 
+function getPositionInfo(trade: Trade): { position_size: number; quantity: number } | null {
+  if (trade.notes) {
+    try {
+      const info = JSON.parse(trade.notes);
+      if (info.position_size && info.quantity) return info;
+    } catch { /* ignore */ }
+  }
+  return null;
+}
+
 export function TradeRow({ trade }: TradeRowProps) {
   const outcomeBadge = () => {
     switch (trade.outcome) {
@@ -22,6 +32,8 @@ export function TradeRow({ trade }: TradeRowProps) {
   };
 
   const pnl = trade.pnl_dollars ?? 0;
+  const pnlPct = trade.pnl_percent ?? 0;
+  const posInfo = getPositionInfo(trade);
   const time = new Date(trade.entry_time).toLocaleString('en-US', {
     month: 'short',
     day: 'numeric',
@@ -33,9 +45,16 @@ export function TradeRow({ trade }: TradeRowProps) {
     <div className="border-b border-[#21262d]/50 py-3 px-4 hover:bg-[#21262d]/20 transition-colors">
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-3 min-w-0">
-          <span className="text-white font-medium w-16">{trade.symbol}</span>
+          <span className="text-white font-medium w-16">
+            {trade.symbol.replace('-USD', '')}
+          </span>
           <Badge label={trade.setup_type} variant="gray" />
           {outcomeBadge()}
+          {posInfo && (
+            <span className="text-[#8b949e] text-xs">
+              ${posInfo.position_size.toLocaleString()} invested
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-4 text-sm shrink-0">
           <span className="text-[#8b949e]">
@@ -44,11 +63,11 @@ export function TradeRow({ trade }: TradeRowProps) {
           </span>
           {trade.status === 'closed' && (
             <span
-              className={`font-medium min-w-[80px] text-right ${
+              className={`font-medium min-w-[100px] text-right ${
                 pnl >= 0 ? 'text-[#00d4aa]' : 'text-[#ff4d4f]'
               }`}
             >
-              {pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}
+              {pnl >= 0 ? '+' : ''}${pnl.toFixed(2)} ({pnlPct >= 0 ? '+' : ''}{pnlPct.toFixed(1)}%)
             </span>
           )}
         </div>

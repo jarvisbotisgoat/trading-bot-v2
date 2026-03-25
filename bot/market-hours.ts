@@ -1,5 +1,5 @@
 const STOCK_WATCHLIST = (process.env.WATCHLIST || 'TSLA,NVDA,SPY,AAPL,AMZN').split(',');
-const CRYPTO_WATCHLIST = ['BTC-USD', 'ETH-USD', 'SOL-USD', 'XRP-USD', 'DOGE-USD', 'AVAX-USD'];
+const CRYPTO_WATCHLIST = ['BTC-USD', 'ETH-USD', 'SOL-USD'];
 
 /**
  * Returns true if US stock market is open (9:30 AM - 4:00 PM ET, Mon-Fri).

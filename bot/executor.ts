@@ -1,11 +1,28 @@
 import { getServiceClient } from '../lib/supabase';
 import type { SetupSignal, Trade } from '../lib/types';
 import { log } from './logger';
-// Telegram alerts disabled — user wants morning briefs only
+
+// Position sizing: allocate this fraction of balance per trade
+const POSITION_ALLOCATION = 0.30; // 30% of balance per trade (3 symbols = ~90% deployed)
+const STARTING_BALANCE = 100_000;
 
 export interface TradeOpenResult {
   trade: Trade | null;
   error: string | null;
+}
+
+async function getCurrentBalance(): Promise<number> {
+  const supabase = getServiceClient();
+  const { data } = await supabase
+    .from('trades')
+    .select('pnl_dollars')
+    .eq('status', 'closed');
+
+  const totalPnl = (data || []).reduce(
+    (sum: number, t: { pnl_dollars: number | null }) => sum + (t.pnl_dollars || 0),
+    0
+  );
+  return STARTING_BALANCE + totalPnl;
 }
 
 export async function openPaperTrade(signal: SetupSignal): Promise<TradeOpenResult> {
@@ -23,6 +40,11 @@ export async function openPaperTrade(signal: SetupSignal): Promise<TradeOpenResu
     return { trade: null, error: `Skipped — already have open trade for ${signal.symbol}` };
   }
 
+  // Position sizing: allocate 30% of current balance
+  const balance = await getCurrentBalance();
+  const positionSize = Math.floor(balance * POSITION_ALLOCATION);
+  const quantity = positionSize / signal.entry_price;
+
   const tradeData = {
     symbol: signal.symbol,
     setup_type: signal.setup_type,
@@ -36,6 +58,7 @@ export async function openPaperTrade(signal: SetupSignal): Promise<TradeOpenResu
     risk_percent:
       Math.abs(signal.entry_price - signal.stop_price) / signal.entry_price * 100,
     status: 'open' as const,
+    notes: JSON.stringify({ position_size: positionSize, quantity }),
   };
 
   try {
@@ -51,9 +74,11 @@ export async function openPaperTrade(signal: SetupSignal): Promise<TradeOpenResu
       return { trade: null, error: msg };
     }
 
-    await log('info', `Opened paper trade: ${signal.symbol} ${signal.setup_type}`, {
+    await log('info', `Opened paper trade: ${signal.symbol} ${signal.setup_type} — $${positionSize.toLocaleString()} (${quantity.toFixed(4)} units)`, {
       trade_id: data.id,
       entry: signal.entry_price,
+      position_size: positionSize,
+      quantity,
     });
 
     return { trade: data as Trade, error: null };
@@ -62,6 +87,19 @@ export async function openPaperTrade(signal: SetupSignal): Promise<TradeOpenResu
     await log('error', msg, { error: String(err) });
     return { trade: null, error: msg };
   }
+}
+
+function getPositionInfo(trade: Trade): { position_size: number; quantity: number } {
+  // Parse position info from notes, fall back to default allocation
+  if (trade.notes) {
+    try {
+      const info = JSON.parse(trade.notes);
+      if (info.position_size && info.quantity) return info;
+    } catch { /* fall through */ }
+  }
+  // Fallback for old trades without position sizing
+  const positionSize = STARTING_BALANCE * POSITION_ALLOCATION;
+  return { position_size: positionSize, quantity: positionSize / trade.entry_price };
 }
 
 export async function checkAndCloseTrades(
@@ -103,7 +141,6 @@ export async function checkAndCloseTrades(
         outcome = 'win';
       }
     } else {
-      // Short trade
       if (currentPrice >= trade.stop_price) {
         shouldClose = true;
         exitPrice = trade.stop_price;
@@ -117,10 +154,12 @@ export async function checkAndCloseTrades(
     }
 
     if (shouldClose) {
-      const pnlDollars = isLong
+      const { position_size, quantity } = getPositionInfo(trade);
+      const priceChange = isLong
         ? exitPrice - trade.entry_price
         : trade.entry_price - exitPrice;
-      const pnlPercent = (pnlDollars / trade.entry_price) * 100;
+      const pnlDollars = quantity * priceChange;
+      const pnlPercent = (pnlDollars / position_size) * 100;
 
       const { error: updateError } = await supabase
         .from('trades')
@@ -142,23 +181,11 @@ export async function checkAndCloseTrades(
         continue;
       }
 
-      const closedTrade: Trade = {
-        ...trade,
-        exit_price: exitPrice,
-        exit_time: new Date().toISOString(),
-        outcome,
-        pnl_dollars: pnlDollars,
-        pnl_percent: pnlPercent,
-        failure_reason: failureReason,
-        status: 'closed',
-      };
-
-      await log('info', `Closed trade: ${trade.symbol} ${outcome}`, {
+      await log('info', `Closed trade: ${trade.symbol} ${outcome} — ${pnlDollars >= 0 ? '+' : ''}$${pnlDollars.toFixed(2)} (${pnlPercent.toFixed(1)}%)`, {
         trade_id: trade.id,
         pnl: pnlDollars,
+        position_size,
       });
-
-      // No Telegram alert — user wants morning briefs only
     }
   }
 }
