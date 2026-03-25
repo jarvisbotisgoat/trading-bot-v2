@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { getServiceClient } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
+  const supabase = getServiceClient();
   const { searchParams } = new URL(req.url);
   const date = searchParams.get('date');
   const limit = parseInt(searchParams.get('limit') || '30', 10);

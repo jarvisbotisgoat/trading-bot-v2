@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { getServiceClient } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
+  const supabase = getServiceClient();
   const { searchParams } = new URL(req.url);
   const status = searchParams.get('status');
   const symbol = searchParams.get('symbol');
@@ -11,7 +12,7 @@ export async function GET(req: NextRequest) {
   const outcome = searchParams.get('outcome');
   const from = searchParams.get('from');
   const to = searchParams.get('to');
-  const limit = parseInt(searchParams.get('limit') || '100', 10);
+  const limit = parseInt(searchParams.get('limit') || '500', 10);
 
   let query = supabase
     .from('trades')

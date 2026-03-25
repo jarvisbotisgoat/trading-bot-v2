@@ -88,9 +88,27 @@ export default function TradesPage() {
     URL.revokeObjectURL(url);
   };
 
+  const openCount = trades.filter((t) => t.status === 'open').length;
+  const closedTrades = trades.filter((t) => t.status === 'closed');
+  const wins = closedTrades.filter((t) => t.outcome === 'win').length;
+  const losses = closedTrades.filter((t) => t.outcome === 'loss').length;
+  const totalPnl = closedTrades.reduce((s, t) => s + (t.pnl_dollars ?? 0), 0);
+
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Trade Feed</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Trade Feed</h1>
+        {!loading && trades.length > 0 && (
+          <div className="flex items-center gap-4 text-sm">
+            <span className="text-[#8b949e]">{openCount} open</span>
+            <span className="text-[#00d4aa]">{wins}W</span>
+            <span className="text-[#ff4d4f]">{losses}L</span>
+            <span className={totalPnl >= 0 ? 'text-[#00d4aa] font-medium' : 'text-[#ff4d4f] font-medium'}>
+              {totalPnl >= 0 ? '+' : ''}${totalPnl.toFixed(2)}
+            </span>
+          </div>
+        )}
+      </div>
 
       <FilterBar filters={filters} onChange={setFilters} onExport={exportCSV} />
 
