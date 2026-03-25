@@ -1,6 +1,6 @@
 import yahooFinance from 'yahoo-finance2';
 import { getServiceClient } from '../lib/supabase';
-import type { PriceBar } from '../lib/types';
+import type { PriceBar, SetupSignal } from '../lib/types';
 import { detectSetups } from './strategy';
 import { detectWave, analyzeWave } from './wave-strategy';
 import { openPaperTrade, checkAndCloseTrades } from './executor';
@@ -54,6 +54,67 @@ async function getOpenSymbols(): Promise<Set<string>> {
     .select('symbol')
     .eq('status', 'open');
   return new Set((data || []).map((t: { symbol: string }) => t.symbol));
+}
+
+/**
+ * Always-trade fallback: picks long or short based on simple indicators.
+ * Called when no specific setup signal fires but we want a position on every symbol.
+ */
+function forceEntry(symbol: string, bars: PriceBar[], vwap: number): SetupSignal {
+  const latest = bars[bars.length - 1];
+  const price = latest.close;
+
+  // Simple direction scoring
+  let bullPoints = 0;
+  let bearPoints = 0;
+
+  // Price vs VWAP
+  if (price > vwap) bullPoints += 2; else bearPoints += 2;
+
+  // Last candle direction
+  if (latest.close > latest.open) bullPoints += 1; else bearPoints += 1;
+
+  // 3-bar trend
+  if (bars.length >= 4) {
+    const b1 = bars[bars.length - 2];
+    const b2 = bars[bars.length - 3];
+    if (latest.close > b1.close && b1.close > b2.close) bullPoints += 2;
+    if (latest.close < b1.close && b1.close < b2.close) bearPoints += 2;
+  }
+
+  // Recent high/low position (where is price in the range?)
+  if (bars.length >= 20) {
+    const recent = bars.slice(-20);
+    const rangeHigh = Math.max(...recent.map(b => b.high));
+    const rangeLow = Math.min(...recent.map(b => b.low));
+    const range = rangeHigh - rangeLow;
+    if (range > 0) {
+      const position = (price - rangeLow) / range;
+      // Upper half = bullish trend, lower half = bearish
+      if (position > 0.5) bullPoints += 1; else bearPoints += 1;
+    }
+  }
+
+  const goLong = bullPoints >= bearPoints;
+  const riskPct = 0.01; // 1% risk
+  const riskAmount = price * riskPct;
+  const rrRatio = 2;
+
+  const entry = price;
+  const stop = goLong ? entry - riskAmount : entry + riskAmount;
+  const target = goLong ? entry + riskAmount * rrRatio : entry - riskAmount * rrRatio;
+  const direction = goLong ? 'WAVE_LONG' : 'WAVE_SHORT';
+
+  return {
+    symbol,
+    setup_type: direction as 'WAVE_LONG' | 'WAVE_SHORT',
+    entry_price: entry,
+    stop_price: stop,
+    target_price: target,
+    thesis: `Auto ${goLong ? 'long' : 'short'} — ${goLong ? 'bull' : 'bear'} bias (${goLong ? bullPoints : bearPoints} pts vs ${goLong ? bearPoints : bullPoints})`,
+    entry_quality_score: Math.max(1, Math.min(10, Math.max(bullPoints, bearPoints))),
+    market_regime: 'trending',
+  };
 }
 
 export interface ScanResult {
@@ -184,32 +245,35 @@ export async function runScan(): Promise<ScanResult[]> {
         wave_analysis: waveInfo,
       });
 
-      if (signals.length > 0) {
-        const sig = signals[0];
-        await log('info', `Scanning ${display}: $${latest.close.toFixed(2)} — SIGNAL: ${sig.setup_type}`, {
-          symbol,
-          price: latest.close,
-          setup: sig.setup_type,
-          entry: sig.entry_price,
-        });
-        await openPaperTrade(sig);
-
-        plannedSetups.push({
-          symbol: display,
-          thesis: sig.thesis,
-          entryZone: `$${(sig.entry_price * 0.998).toFixed(2)}–$${(sig.entry_price * 1.002).toFixed(2)}`,
-          stop: `$${sig.stop_price.toFixed(2)}`,
-          target: `$${sig.target_price.toFixed(2)}`,
-          invalidation: `Break ${sig.target_price > sig.entry_price ? 'below' : 'above'} $${sig.stop_price.toFixed(2)}`,
-        });
-      } else {
-        await log('info', `Scanning ${display}: $${latest.close.toFixed(2)} — no setup`, {
-          symbol,
-          price: latest.close,
-          vwap,
-          wave: waveInfo,
-        });
+      // If no specific signal, force a trade anyway — always be in a position
+      if (signals.length === 0) {
+        const forced = forceEntry(symbol, bars, vwap);
+        signals = [forced];
       }
+
+      const sig = signals[0];
+      results[results.length - 1] = {
+        ...results[results.length - 1],
+        signals_found: 1,
+        signal_type: sig.setup_type,
+      };
+
+      await log('info', `Scanning ${display}: $${latest.close.toFixed(2)} — ${sig.thesis.startsWith('Auto') ? 'AUTO' : 'SIGNAL'}: ${sig.setup_type}`, {
+        symbol,
+        price: latest.close,
+        setup: sig.setup_type,
+        entry: sig.entry_price,
+      });
+      await openPaperTrade(sig);
+
+      plannedSetups.push({
+        symbol: display,
+        thesis: sig.thesis,
+        entryZone: `$${(sig.entry_price * 0.998).toFixed(2)}–$${(sig.entry_price * 1.002).toFixed(2)}`,
+        stop: `$${sig.stop_price.toFixed(2)}`,
+        target: `$${sig.target_price.toFixed(2)}`,
+        invalidation: `Break ${sig.target_price > sig.entry_price ? 'below' : 'above'} $${sig.stop_price.toFixed(2)}`,
+      });
     } catch (err) {
       await log('error', `Error scanning ${display}`, { error: String(err) });
       results.push({ symbol, price: 0, bars_count: 0, vwap: 0, signals_found: 0, skipped: true });
