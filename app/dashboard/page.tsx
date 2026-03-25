@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import type { Trade, BotStatus, DailySummary } from '@/lib/types';
 import { StatTile } from '@/components/ui/stat-tile';
 import { Card } from '@/components/ui/card';
@@ -68,24 +68,6 @@ export default function DashboardPage() {
     return () => clearInterval(interval);
   }, [fetchData]);
 
-  // When bot is running, trigger a scan every 60s from the browser
-  const scanInterval = useRef<ReturnType<typeof setInterval> | null>(null);
-  useEffect(() => {
-    if (botRunning) {
-      // Kick off an immediate scan when toggled on
-      fetch('/api/bot/scan').catch(() => {});
-      scanInterval.current = setInterval(() => {
-        fetch('/api/bot/scan').catch(() => {});
-      }, 60000);
-    } else if (scanInterval.current) {
-      clearInterval(scanInterval.current);
-      scanInterval.current = null;
-    }
-    return () => {
-      if (scanInterval.current) clearInterval(scanInterval.current);
-    };
-  }, [botRunning]);
-
   const todayPnl = todaySummary?.total_pnl ?? 0;
   const winRate = todaySummary?.win_rate ?? 0;
   const maxDrawdown = todaySummary?.max_drawdown ?? 0;
@@ -134,7 +116,7 @@ export default function DashboardPage() {
 
       {/* Live Feed */}
       <Card>
-        <LiveFeed refreshInterval={botRunning ? 5000 : 15000} />
+        <LiveFeed isRunning={botRunning} onScanComplete={fetchData} />
       </Card>
 
       {/* Equity Curve */}
