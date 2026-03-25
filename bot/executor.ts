@@ -11,6 +11,18 @@ export interface TradeOpenResult {
 export async function openPaperTrade(signal: SetupSignal): Promise<TradeOpenResult> {
   const supabase = getServiceClient();
 
+  // Prevent duplicate open trades for the same symbol
+  const { data: existing } = await supabase
+    .from('trades')
+    .select('id')
+    .eq('symbol', signal.symbol)
+    .eq('status', 'open')
+    .limit(1);
+
+  if (existing && existing.length > 0) {
+    return { trade: null, error: `Skipped — already have open trade for ${signal.symbol}` };
+  }
+
   const tradeData = {
     symbol: signal.symbol,
     setup_type: signal.setup_type,

@@ -45,6 +45,17 @@ export default function DashboardPage() {
   const [openTrades, setOpenTrades] = useState<Trade[]>([]);
   const [todaySummary, setTodaySummary] = useState<DailySummary | null>(null);
   const [equityData, setEquityData] = useState<{ time: string; value: number }[]>([]);
+  const [liveStats, setLiveStats] = useState<{
+    totalPnl: number;
+    todayPnl: number;
+    winRate: number;
+    wins: number;
+    losses: number;
+    totalTrades: number;
+    openTrades: number;
+    maxDrawdown: number;
+    balance: number;
+  } | null>(null);
   const [marketOpen, setMarketOpen] = useState(isMarketOpenClient());
   const watchlist = marketOpen ? STOCK_WATCHLIST : CRYPTO_WATCHLIST;
   const [activeSymbol, setActiveSymbol] = useState(watchlist[0]);
@@ -103,11 +114,12 @@ export default function DashboardPage() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [statusRes, tradesRes, summaryRes, controlRes] = await Promise.all([
+      const [statusRes, tradesRes, summaryRes, controlRes, statsRes] = await Promise.all([
         fetch('/api/bot-status'),
         fetch('/api/trades?status=open'),
         fetch('/api/summary?limit=30'),
         fetch('/api/bot/control'),
+        fetch('/api/stats'),
       ]);
 
       if (statusRes.ok) setBotStatus(await statusRes.json());
@@ -116,6 +128,7 @@ export default function DashboardPage() {
         setBotRunning(control.is_running || false);
       }
       if (tradesRes.ok) setOpenTrades(await tradesRes.json());
+      if (statsRes.ok) setLiveStats(await statsRes.json());
       if (summaryRes.ok) {
         const summaries: DailySummary[] = await summaryRes.json();
         if (summaries.length > 0) {
@@ -141,10 +154,11 @@ export default function DashboardPage() {
     return () => clearInterval(interval);
   }, [fetchData]);
 
-  const todayPnl = todaySummary?.total_pnl ?? 0;
-  const winRate = todaySummary?.win_rate ?? 0;
-  const maxDrawdown = todaySummary?.max_drawdown ?? 0;
-  const currentBalance = STARTING_BALANCE + todayPnl;
+  // Use live stats from real trade data, fall back to daily_summary
+  const todayPnl = liveStats?.todayPnl ?? todaySummary?.total_pnl ?? 0;
+  const winRate = liveStats?.winRate ?? todaySummary?.win_rate ?? 0;
+  const maxDrawdown = liveStats?.maxDrawdown ?? todaySummary?.max_drawdown ?? 0;
+  const currentBalance = liveStats?.balance ?? STARTING_BALANCE + todayPnl;
 
   return (
     <div className="space-y-6">
