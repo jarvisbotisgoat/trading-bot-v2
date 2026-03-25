@@ -31,6 +31,8 @@ interface ScanResult {
     emaSpread: number;
     volumeRatio: number;
   };
+  trade_opened?: boolean;
+  trade_error?: string;
 }
 
 interface LiveFeedProps {
@@ -123,7 +125,13 @@ export function LiveFeed({ isRunning, onScanComplete }: LiveFeedProps) {
             addLine(`${sym}: $${r.price.toFixed(2)} — monitoring open trade${waveTag}`, 'info');
           } else if (r.signals_found > 0) {
             const direction = r.signal_type?.includes('SHORT') ? 'SHORT' : 'LONG';
-            addLine(`${sym}: $${r.price.toFixed(2)} — ${direction} SIGNAL: ${r.signal_type}${waveTag}`, 'signal');
+            if (r.trade_opened) {
+              addLine(`${sym}: $${r.price.toFixed(2)} — OPENED ${direction} (${r.signal_type})${waveTag}`, 'signal');
+            } else if (r.trade_error) {
+              addLine(`${sym}: $${r.price.toFixed(2)} — ${direction} signal but FAILED: ${r.trade_error}`, 'error');
+            } else {
+              addLine(`${sym}: $${r.price.toFixed(2)} — ${direction} SIGNAL: ${r.signal_type}${waveTag}`, 'signal');
+            }
           } else {
             addLine(`${sym}: $${r.price.toFixed(2)} — watching${waveTag}`, 'info');
           }

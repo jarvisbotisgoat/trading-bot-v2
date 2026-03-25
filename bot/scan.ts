@@ -125,6 +125,8 @@ export interface ScanResult {
   signals_found: number;
   skipped: boolean;
   signal_type?: string;
+  trade_opened?: boolean;
+  trade_error?: string;
   wave_analysis?: {
     trend: string;
     rsi: number;
@@ -264,7 +266,14 @@ export async function runScan(): Promise<ScanResult[]> {
         setup: sig.setup_type,
         entry: sig.entry_price,
       });
-      await openPaperTrade(sig);
+
+      const { trade, error: tradeError } = await openPaperTrade(sig);
+      if (trade) {
+        results[results.length - 1].trade_opened = true;
+      } else {
+        results[results.length - 1].trade_opened = false;
+        results[results.length - 1].trade_error = tradeError || 'Unknown error opening trade';
+      }
 
       plannedSetups.push({
         symbol: display,

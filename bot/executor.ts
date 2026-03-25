@@ -3,7 +3,12 @@ import type { SetupSignal, Trade } from '../lib/types';
 import { log } from './logger';
 // Telegram alerts disabled — user wants morning briefs only
 
-export async function openPaperTrade(signal: SetupSignal): Promise<Trade | null> {
+export interface TradeOpenResult {
+  trade: Trade | null;
+  error: string | null;
+}
+
+export async function openPaperTrade(signal: SetupSignal): Promise<TradeOpenResult> {
   const supabase = getServiceClient();
 
   const tradeData = {
@@ -21,26 +26,30 @@ export async function openPaperTrade(signal: SetupSignal): Promise<Trade | null>
     status: 'open' as const,
   };
 
-  const { data, error } = await supabase
-    .from('trades')
-    .insert(tradeData)
-    .select()
-    .single();
+  try {
+    const { data, error } = await supabase
+      .from('trades')
+      .insert(tradeData)
+      .select()
+      .single();
 
-  if (error) {
-    await log('error', `Failed to open trade for ${signal.symbol}`, {
-      error: error.message,
+    if (error) {
+      const msg = `Failed to open trade for ${signal.symbol}: ${error.message} (code: ${error.code}, details: ${error.details})`;
+      await log('error', msg, { error: error.message, code: error.code, details: error.details, hint: error.hint });
+      return { trade: null, error: msg };
+    }
+
+    await log('info', `Opened paper trade: ${signal.symbol} ${signal.setup_type}`, {
+      trade_id: data.id,
+      entry: signal.entry_price,
     });
-    return null;
+
+    return { trade: data as Trade, error: null };
+  } catch (err) {
+    const msg = `Exception opening trade for ${signal.symbol}: ${String(err)}`;
+    await log('error', msg, { error: String(err) });
+    return { trade: null, error: msg };
   }
-
-  await log('info', `Opened paper trade: ${signal.symbol} ${signal.setup_type}`, {
-    trade_id: data.id,
-    entry: signal.entry_price,
-  });
-
-  // Log trade entry — no Telegram alert (user wants morning briefs only)
-  return data as Trade;
 }
 
 export async function checkAndCloseTrades(
