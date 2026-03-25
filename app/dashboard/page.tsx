@@ -5,9 +5,11 @@ import type { Trade, BotStatus, DailySummary } from '@/lib/types';
 import { StatTile } from '@/components/ui/stat-tile';
 import { Card } from '@/components/ui/card';
 import { BotStatusBadge } from '@/components/dashboard/bot-status-badge';
+import { BotToggle } from '@/components/dashboard/bot-toggle';
 import { OpenTradesTable } from '@/components/dashboard/open-trades-table';
 import { WatchlistStrip } from '@/components/dashboard/watchlist-strip';
 import { EquityCurve } from '@/components/charts/equity-curve';
+import { LiveFeed } from '@/components/dashboard/live-feed';
 import { CandlestickChart } from '@/components/charts/candlestick-chart';
 import { CandlestickData, Time } from 'lightweight-charts';
 
@@ -19,6 +21,7 @@ export default function DashboardPage() {
     lastRun: null,
     openTrades: 0,
   });
+  const [botRunning, setBotRunning] = useState(false);
   const [openTrades, setOpenTrades] = useState<Trade[]>([]);
   const [todaySummary, setTodaySummary] = useState<DailySummary | null>(null);
   const [equityData, setEquityData] = useState<{ time: string; value: number }[]>([]);
@@ -27,19 +30,23 @@ export default function DashboardPage() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [statusRes, tradesRes, summaryRes] = await Promise.all([
+      const [statusRes, tradesRes, summaryRes, controlRes] = await Promise.all([
         fetch('/api/bot-status'),
         fetch('/api/trades?status=open'),
         fetch('/api/summary?limit=30'),
+        fetch('/api/bot/control'),
       ]);
 
       if (statusRes.ok) setBotStatus(await statusRes.json());
+      if (controlRes.ok) {
+        const control = await controlRes.json();
+        setBotRunning(control.is_running || false);
+      }
       if (tradesRes.ok) setOpenTrades(await tradesRes.json());
       if (summaryRes.ok) {
         const summaries: DailySummary[] = await summaryRes.json();
         if (summaries.length > 0) {
           setTodaySummary(summaries[0]);
-          // Build equity curve from daily summaries
           let cumulative = 0;
           const curve = summaries
             .reverse()
@@ -70,7 +77,10 @@ export default function DashboardPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Dashboard</h1>
-        <BotStatusBadge status={botStatus} />
+        <div className="flex items-center gap-3">
+          <BotToggle isRunning={botRunning} onToggle={setBotRunning} />
+          <BotStatusBadge status={botStatus} />
+        </div>
       </div>
 
       {/* Watchlist */}
@@ -103,6 +113,11 @@ export default function DashboardPage() {
           color={maxDrawdown < 0 ? 'red' : 'white'}
         />
       </div>
+
+      {/* Live Feed */}
+      <Card>
+        <LiveFeed refreshInterval={botRunning ? 5000 : 15000} />
+      </Card>
 
       {/* Equity Curve */}
       {equityData.length > 0 && (
