@@ -1,9 +1,11 @@
 import { NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { getServiceClient } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
+  const supabase = getServiceClient();
+
   // Check last bot_log entry to determine status
   const { data: lastLog, error: logError } = await supabase
     .from('bot_log')
