@@ -16,13 +16,8 @@ const geistMono = localFont({
 
 export const metadata: Metadata = {
   title: 'Trading OS',
-  description: 'Paper trading platform with bot engine and learning loop',
+  description: 'Crypto trading bot',
 };
-
-const navItems = [
-  { href: '/dashboard', label: 'Dashboard' },
-  { href: '/trades', label: 'Trades' },
-];
 
 export default function RootLayout({
   children,
@@ -35,21 +30,10 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-[#0d0f14] text-white min-h-screen`}
       >
         <nav className="border-b border-[#21262d] bg-[#161b22]">
-          <div className="max-w-7xl mx-auto px-4 flex items-center h-14 gap-8">
+          <div className="max-w-7xl mx-auto px-4 flex items-center h-14">
             <Link href="/dashboard" className="text-lg font-bold text-[#00d4aa]">
               Trading OS
             </Link>
-            <div className="flex gap-1">
-              {navItems.map((item) => (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className="px-3 py-1.5 rounded-md text-sm text-[#8b949e] hover:text-white hover:bg-[#21262d]/50 transition-colors"
-                >
-                  {item.label}
-                </Link>
-              ))}
-            </div>
           </div>
         </nav>
         <main className="max-w-7xl mx-auto px-4 py-6">{children}</main>
