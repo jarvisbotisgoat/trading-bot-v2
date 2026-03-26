@@ -144,7 +144,7 @@ export default function DashboardPage() {
           <button
             onClick={async () => {
               if (!confirm('Delete ALL trades and start fresh at $100?')) return;
-              const res = await fetch('/api/bot/cleanup', { method: 'POST' });
+              const res = await fetch(`/api/bot/cleanup?confirm=yes&_t=${Date.now()}`, { cache: 'no-store' });
               const data = await res.json();
               alert(JSON.stringify(data.results || data, null, 2));
               window.location.reload();
