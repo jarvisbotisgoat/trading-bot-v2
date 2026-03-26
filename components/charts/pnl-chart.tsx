@@ -1,78 +1,96 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { createChart, ColorType, LineStyle, AreaSeriesPartialOptions } from 'lightweight-charts';
 
 interface PnlChartProps {
-  data: { time: string; value: number }[];
+  data: { time: number; value: number }[];
   height?: number;
 }
 
 export function PnlChart({ data, height = 200 }: PnlChartProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
-    if (!containerRef.current || data.length === 0) return;
+    const canvas = canvasRef.current;
+    if (!canvas || data.length < 2) return;
 
-    const chart = createChart(containerRef.current, {
-      height,
-      layout: {
-        background: { type: ColorType.Solid, color: 'transparent' },
-        textColor: '#8b949e',
-        fontSize: 11,
-      },
-      grid: {
-        vertLines: { visible: false },
-        horzLines: { color: '#21262d', style: LineStyle.Dotted },
-      },
-      rightPriceScale: {
-        borderVisible: false,
-        scaleMargins: { top: 0.1, bottom: 0.1 },
-      },
-      timeScale: {
-        borderVisible: false,
-        timeVisible: true,
-        secondsVisible: false,
-      },
-      crosshair: {
-        horzLine: { visible: false },
-        vertLine: { color: '#484f58', style: LineStyle.Dotted },
-      },
-    });
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
 
-    const lastValue = data[data.length - 1]?.value ?? 0;
-    const lineColor = lastValue >= 0 ? '#00d4aa' : '#ff4d4f';
-    const areaTopColor = lastValue >= 0 ? 'rgba(0, 212, 170, 0.3)' : 'rgba(255, 77, 79, 0.3)';
-    const areaBottomColor = lastValue >= 0 ? 'rgba(0, 212, 170, 0.02)' : 'rgba(255, 77, 79, 0.02)';
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = height * dpr;
+    ctx.scale(dpr, dpr);
 
-    const seriesOptions: AreaSeriesPartialOptions = {
-      lineColor,
-      topColor: areaTopColor,
-      bottomColor: areaBottomColor,
-      lineWidth: 2,
-    };
+    const w = rect.width;
+    const h = height;
+    const padding = { top: 20, right: 60, bottom: 25, left: 10 };
+    const chartW = w - padding.left - padding.right;
+    const chartH = h - padding.top - padding.bottom;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const series = (chart as any).addSeries('Area', seriesOptions);
+    // Clear
+    ctx.clearRect(0, 0, w, h);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    series.setData(data as any);
-    chart.timeScale().fitContent();
+    const values = data.map(d => d.value);
+    const minVal = Math.min(0, ...values);
+    const maxVal = Math.max(0, ...values);
+    const range = maxVal - minVal || 1;
 
-    const handleResize = () => {
-      if (containerRef.current) {
-        chart.applyOptions({ width: containerRef.current.clientWidth });
-      }
-    };
-    window.addEventListener('resize', handleResize);
+    const toX = (i: number) => padding.left + (i / (data.length - 1)) * chartW;
+    const toY = (v: number) => padding.top + (1 - (v - minVal) / range) * chartH;
 
-    return () => {
-      window.removeEventListener('resize', handleResize);
-      chart.remove();
-    };
+    const lastVal = values[values.length - 1];
+    const isUp = lastVal >= 0;
+    const lineColor = isUp ? '#00d4aa' : '#ff4d4f';
+    const fillColor = isUp ? 'rgba(0, 212, 170, 0.15)' : 'rgba(255, 77, 79, 0.15)';
+
+    // Zero line
+    const zeroY = toY(0);
+    ctx.strokeStyle = '#21262d';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(padding.left, zeroY);
+    ctx.lineTo(w - padding.right, zeroY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Fill area
+    ctx.beginPath();
+    ctx.moveTo(toX(0), zeroY);
+    for (let i = 0; i < data.length; i++) {
+      ctx.lineTo(toX(i), toY(values[i]));
+    }
+    ctx.lineTo(toX(data.length - 1), zeroY);
+    ctx.closePath();
+    ctx.fillStyle = fillColor;
+    ctx.fill();
+
+    // Line
+    ctx.beginPath();
+    ctx.moveTo(toX(0), toY(values[0]));
+    for (let i = 1; i < data.length; i++) {
+      ctx.lineTo(toX(i), toY(values[i]));
+    }
+    ctx.strokeStyle = lineColor;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Current value label
+    const labelY = toY(lastVal);
+    ctx.fillStyle = lineColor;
+    ctx.font = '11px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText(`$${lastVal.toFixed(2)}`, w - padding.right + 5, labelY + 4);
+
+    // $0 label
+    ctx.fillStyle = '#484f58';
+    ctx.fillText('$0', w - padding.right + 5, zeroY + 4);
+
   }, [data, height]);
 
-  if (data.length === 0) {
+  if (data.length < 2) {
     return (
       <div className="flex items-center justify-center text-[#484f58] text-sm" style={{ height }}>
         No trade history yet
@@ -80,5 +98,11 @@ export function PnlChart({ data, height = 200 }: PnlChartProps) {
     );
   }
 
-  return <div ref={containerRef} />;
+  return (
+    <canvas
+      ref={canvasRef}
+      style={{ width: '100%', height }}
+      className="block"
+    />
+  );
 }

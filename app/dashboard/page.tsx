@@ -38,7 +38,7 @@ export default function DashboardPage() {
   } | null>(null);
   const [currentPrices, setCurrentPrices] = useState<Record<string, number>>({});
   const [prevPrices, setPrevPrices] = useState<Record<string, number>>({});
-  const [pnlHistory, setPnlHistory] = useState<{ time: string; value: number }[]>([]);
+  const [pnlHistory, setPnlHistory] = useState<{ time: number; value: number }[]>([]);
 
   // Compute unrealized P/L from live prices
   const unrealizedPnl = openTrades.reduce((total, trade) => {
