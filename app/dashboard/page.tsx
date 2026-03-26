@@ -191,13 +191,15 @@ export default function DashboardPage() {
         <div className="flex items-center gap-3">
           <button
             onClick={async () => {
-              if (!confirm('Reset bot? This wipes ALL trades and starts fresh at $100k.')) return;
-              await fetch('/api/bot/cleanup', { method: 'POST' });
+              if (!confirm('Clean up duplicate open trades? Your win/loss history will be kept.')) return;
+              const res = await fetch('/api/bot/cleanup', { method: 'POST' });
+              const result = await res.json();
+              alert(`Done! ${result.remaining.open} open trades, ${result.remaining.closed} closed trades kept.`);
               fetchData();
             }}
             className="text-xs px-3 py-1.5 rounded bg-[#21262d] text-[#8b949e] border border-[#30363d] hover:text-[#ff4d4f] hover:border-[#ff4d4f]/30 transition-colors"
           >
-            Reset
+            Clean Up
           </button>
           <BotToggle isRunning={botRunning} onToggle={setBotRunning} />
           <BotStatusBadge status={{
