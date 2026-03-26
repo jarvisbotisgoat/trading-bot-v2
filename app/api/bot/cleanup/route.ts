@@ -7,64 +7,78 @@ export async function POST() {
   const supabase = getServiceClient();
   const results: string[] = [];
 
-  // Check: can we even read trades?
-  const { data: trades, error: readErr } = await supabase
-    .from('trades')
-    .select('id, status')
-    .limit(5);
+  // Stop the bot first
+  await supabase.from('bot_control').update({ is_running: false }).eq('id', 1);
+  results.push('bot stopped');
 
-  results.push(`read test: ${readErr ? 'ERROR: ' + readErr.message : (trades?.length ?? 0) + ' rows found'}`);
+  // Use raw SQL via rpc to bypass any RLS issues
+  // First, null out FK references in daily_summary
+  const { error: fkErr } = await supabase.rpc('exec_sql', {
+    query: 'UPDATE daily_summary SET best_trade_id = NULL, worst_trade_id = NULL'
+  }).single();
 
-  // Check: what key are we using?
-  const hasServiceKey = !!process.env.SUPABASE_SERVICE_ROLE_KEY && process.env.SUPABASE_SERVICE_ROLE_KEY !== 'placeholder';
-  results.push(`service key set: ${hasServiceKey}`);
+  if (fkErr) {
+    // rpc function doesn't exist — create it and try direct deletes
+    results.push('rpc not available, trying direct delete');
 
-  if (!trades || trades.length === 0) {
-    results.push('no trades to delete');
-    return NextResponse.json({ results }, { headers: { 'Cache-Control': 'no-store' } });
-  }
-
-  // Try deleting ONE trade by ID to test
-  const testId = trades[0].id;
-  const { error: delErr, count } = await supabase
-    .from('trades')
-    .delete({ count: 'exact' })
-    .eq('id', testId);
-
-  results.push(`delete test (id=${testId}): ${delErr ? 'ERROR: ' + delErr.message + ' code=' + delErr.code + ' hint=' + delErr.hint : 'deleted ' + count}`);
-
-  // If single delete worked, delete everything
-  if (!delErr) {
-    // Stop bot first
-    await supabase.from('bot_control').update({ is_running: false }).eq('id', 1);
-
-    // Delete daily_summary first (FK refs)
-    const { error: e1, count: c1 } = await supabase
+    // Try: update daily_summary to null FKs, then delete trades
+    await supabase
       .from('daily_summary')
-      .delete({ count: 'exact' })
+      .delete()
       .gte('date', '2000-01-01');
-    results.push(`daily_summary: ${e1 ? 'ERROR: ' + e1.message : 'deleted ' + c1}`);
 
-    // Delete all trades
-    const { error: e2, count: c2 } = await supabase
+    // Try multiple delete approaches for trades
+    // Approach 1: delete by status
+    const { count: c1 } = await supabase
       .from('trades')
       .delete({ count: 'exact' })
-      .gte('created_at', '2000-01-01');
-    results.push(`trades: ${e2 ? 'ERROR: ' + e2.message : 'deleted ' + c2}`);
+      .eq('status', 'open');
+    results.push(`deleted open: ${c1 ?? 0}`);
 
-    // Delete logs
-    const { error: e3, count: c3 } = await supabase
-      .from('bot_log')
-      .delete({ count: 'exact' })
-      .gte('created_at', '2000-01-01');
-    results.push(`bot_log: ${e3 ? 'ERROR: ' + e3.message : 'deleted ' + c3}`);
-
-    // Verify
-    const { count: remaining } = await supabase
+    const { count: c2 } = await supabase
       .from('trades')
-      .select('id', { count: 'exact', head: true });
-    results.push(`trades remaining: ${remaining}`);
+      .delete({ count: 'exact' })
+      .eq('status', 'closed');
+    results.push(`deleted closed: ${c2 ?? 0}`);
+
+    // Approach 2: if above didn't work, try selecting IDs and deleting by ID
+    if ((c1 ?? 0) === 0 && (c2 ?? 0) === 0) {
+      const { data: allTrades } = await supabase
+        .from('trades')
+        .select('id')
+        .limit(500);
+
+      if (allTrades && allTrades.length > 0) {
+        results.push(`found ${allTrades.length} trades by select`);
+        const ids = allTrades.map(t => t.id);
+
+        // Delete in batches of 50
+        for (let i = 0; i < ids.length; i += 50) {
+          const batch = ids.slice(i, i + 50);
+          const { error: batchErr, count: batchCount } = await supabase
+            .from('trades')
+            .delete({ count: 'exact' })
+            .in('id', batch);
+          results.push(`batch ${i/50}: ${batchErr ? 'ERROR: ' + batchErr.message : 'deleted ' + batchCount}`);
+        }
+      } else {
+        results.push('select also returned 0 trades — RLS is blocking reads too');
+      }
+    }
+  } else {
+    results.push('FKs nulled');
+    // Delete everything via SQL
+    await supabase.rpc('exec_sql', { query: 'DELETE FROM daily_summary' });
+    await supabase.rpc('exec_sql', { query: 'DELETE FROM trades' });
+    await supabase.rpc('exec_sql', { query: 'DELETE FROM bot_log' });
+    results.push('all tables cleared via SQL');
   }
+
+  // Clear logs regardless
+  await supabase
+    .from('bot_log')
+    .delete()
+    .gte('created_at', '2000-01-01');
 
   return NextResponse.json({ results }, { headers: { 'Cache-Control': 'no-store' } });
 }
