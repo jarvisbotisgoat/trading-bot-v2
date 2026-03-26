@@ -26,8 +26,8 @@ export async function POST() {
   // Delete daily summaries
   const { error: e3 } = await supabase
     .from('daily_summary')
-    .gte('date', '2000-01-01')
-    .delete();
+    .delete()
+    .gte('date', '2000-01-01');
 
   const errors = [e1, e2, e3].filter(Boolean);
   if (errors.length > 0) {
