@@ -11,23 +11,31 @@ export const dynamic = 'force-dynamic';
 export async function POST() {
   const supabase = getServiceClient();
 
-  // Delete ALL trades — open and closed
-  await supabase
+  // Delete ALL trades — use gte on created_at to match everything
+  const { error: e1 } = await supabase
     .from('trades')
     .delete()
-    .neq('id', '00000000-0000-0000-0000-000000000000');
+    .gte('created_at', '2000-01-01');
 
   // Delete all bot logs
-  await supabase
+  const { error: e2 } = await supabase
     .from('bot_log')
     .delete()
-    .neq('id', '00000000-0000-0000-0000-000000000000');
+    .gte('created_at', '2000-01-01');
 
   // Delete daily summaries
-  await supabase
+  const { error: e3 } = await supabase
     .from('daily_summary')
-    .delete()
-    .neq('date', '1900-01-01');
+    .gte('date', '2000-01-01')
+    .delete();
+
+  const errors = [e1, e2, e3].filter(Boolean);
+  if (errors.length > 0) {
+    return NextResponse.json({
+      message: 'Reset had errors',
+      errors: errors.map(e => e?.message),
+    }, { status: 500, headers: { 'Cache-Control': 'no-store' } });
+  }
 
   return NextResponse.json({
     message: 'Full reset — $100 fresh start',
