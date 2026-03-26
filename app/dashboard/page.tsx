@@ -57,16 +57,18 @@ export default function DashboardPage() {
   const wins = liveStats?.wins ?? 0;
   const losses = liveStats?.losses ?? 0;
 
-  // Main data fetch (every 15s)
+  // Main data fetch (every 15s) — cache-bust to avoid Vercel edge cache
   const fetchData = useCallback(async () => {
     try {
+      const cb = `_t=${Date.now()}`;
+      const nocache = { cache: 'no-store' as RequestCache };
       const [statusRes, openRes, closedRes, controlRes, statsRes, pnlRes] = await Promise.all([
-        fetch('/api/bot-status'),
-        fetch('/api/trades?status=open'),
-        fetch('/api/trades?status=closed&limit=20'),
-        fetch('/api/bot/control'),
-        fetch('/api/stats'),
-        fetch('/api/pnl-history'),
+        fetch(`/api/bot-status?${cb}`, nocache),
+        fetch(`/api/trades?status=open&${cb}`, nocache),
+        fetch(`/api/trades?status=closed&limit=20&${cb}`, nocache),
+        fetch(`/api/bot/control?${cb}`, nocache),
+        fetch(`/api/stats?${cb}`, nocache),
+        fetch(`/api/pnl-history?${cb}`, nocache),
       ]);
 
       if (statusRes.ok) setBotStatus(await statusRes.json());
@@ -92,7 +94,7 @@ export default function DashboardPage() {
   // Fast price polling (every 5s)
   const fetchPrices = useCallback(async () => {
     try {
-      const res = await fetch(`/api/prices?symbols=${CRYPTO_WATCHLIST.join(',')}`);
+      const res = await fetch(`/api/prices?symbols=${CRYPTO_WATCHLIST.join(',')}&_t=${Date.now()}`, { cache: 'no-store' });
       if (res.ok) {
         const newPrices = await res.json();
         setCurrentPrices((prev) => {
