@@ -40,10 +40,12 @@ async function fetchStockBars(symbol: string): Promise<PriceBar[]> {
 
 async function getOpenSymbols(): Promise<Set<string>> {
   const supabase = getServiceClient();
+  const cutoff = process.env.RESET_CUTOFF_DATE || '2026-03-27';
   const { data } = await supabase
     .from('trades')
     .select('symbol')
-    .eq('status', 'open');
+    .eq('status', 'open')
+    .gte('created_at', cutoff);
   return new Set((data || []).map((t: { symbol: string }) => t.symbol));
 }
 

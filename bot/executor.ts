@@ -26,12 +26,14 @@ async function getCurrentBalance(): Promise<number> {
 export async function openPaperTrade(signal: SetupSignal): Promise<TradeOpenResult> {
   const supabase = getServiceClient();
 
-  // Prevent duplicate open trades for the same symbol
+  // Prevent duplicate open trades for the same symbol (only post-reset)
+  const cutoff = process.env.RESET_CUTOFF_DATE || '2026-03-27';
   const { data: existing } = await supabase
     .from('trades')
     .select('id')
     .eq('symbol', signal.symbol)
     .eq('status', 'open')
+    .gte('created_at', cutoff)
     .limit(1);
 
   if (existing && existing.length > 0) {
@@ -112,10 +114,12 @@ export async function checkAndCloseTrades(
 ): Promise<void> {
   const supabase = getServiceClient();
 
+  const cutoff = process.env.RESET_CUTOFF_DATE || '2026-03-27';
   const { data: openTrades, error } = await supabase
     .from('trades')
     .select('*')
-    .eq('status', 'open');
+    .eq('status', 'open')
+    .gte('created_at', cutoff);
 
   if (error) {
     await log('error', 'Failed to fetch open trades', { error: error.message });
