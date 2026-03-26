@@ -3,42 +3,47 @@ import { getServiceClient } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
 
-/**
- * POST /api/bot/cleanup
- * Nuclear reset: deletes ALL trades (open + closed), all logs.
- * Fresh start at $100.
- */
 export async function POST() {
   const supabase = getServiceClient();
+  const results: string[] = [];
 
-  // Delete ALL trades — use gte on created_at to match everything
-  const { error: e1 } = await supabase
-    .from('trades')
-    .delete()
-    .gte('created_at', '2000-01-01');
-
-  // Delete all bot logs
-  const { error: e2 } = await supabase
-    .from('bot_log')
-    .delete()
-    .gte('created_at', '2000-01-01');
-
-  // Delete daily summaries
-  const { error: e3 } = await supabase
+  // Step 1: Delete daily_summary FIRST (has FK references to trades)
+  const { error: e1, count: c1 } = await supabase
     .from('daily_summary')
-    .delete()
+    .delete({ count: 'exact' })
     .gte('date', '2000-01-01');
+  results.push(`daily_summary: ${e1 ? 'ERROR: ' + e1.message : 'deleted ' + (c1 ?? '?')}`);
 
-  const errors = [e1, e2, e3].filter(Boolean);
-  if (errors.length > 0) {
-    return NextResponse.json({
-      message: 'Reset had errors',
-      errors: errors.map(e => e?.message),
-    }, { status: 500, headers: { 'Cache-Control': 'no-store' } });
-  }
+  // Step 2: Now delete trades (no more FK blocking)
+  const { error: e2, count: c2 } = await supabase
+    .from('trades')
+    .delete({ count: 'exact' })
+    .gte('created_at', '2000-01-01');
+  results.push(`trades: ${e2 ? 'ERROR: ' + e2.message : 'deleted ' + (c2 ?? '?')}`);
+
+  // Step 3: Delete bot logs
+  const { error: e3, count: c3 } = await supabase
+    .from('bot_log')
+    .delete({ count: 'exact' })
+    .gte('created_at', '2000-01-01');
+  results.push(`bot_log: ${e3 ? 'ERROR: ' + e3.message : 'deleted ' + (c3 ?? '?')}`);
+
+  // Step 4: Stop the bot so cron doesn't immediately recreate trades
+  await supabase
+    .from('bot_control')
+    .update({ is_running: false })
+    .eq('id', 1);
+
+  // Step 5: Verify trades are actually gone
+  const { data: remaining } = await supabase
+    .from('trades')
+    .select('id', { count: 'exact', head: true });
+
+  results.push(`trades remaining: ${remaining?.length ?? 'unknown'}`);
 
   return NextResponse.json({
-    message: 'Full reset — $100 fresh start',
+    message: 'Reset complete',
+    results,
   }, {
     headers: { 'Cache-Control': 'no-store' },
   });

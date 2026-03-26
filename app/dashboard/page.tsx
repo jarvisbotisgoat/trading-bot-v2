@@ -127,8 +127,10 @@ export default function DashboardPage() {
         <div className="flex items-center gap-3">
           <button
             onClick={async () => {
-              if (!confirm('Delete all open trades and start fresh?')) return;
-              await fetch('/api/bot/cleanup', { method: 'POST' });
+              if (!confirm('Delete ALL trades and start fresh at $100?')) return;
+              const res = await fetch('/api/bot/cleanup', { method: 'POST' });
+              const data = await res.json();
+              alert(JSON.stringify(data.results || data, null, 2));
               window.location.reload();
             }}
             className="text-xs px-3 py-1.5 rounded bg-[#21262d] text-[#8b949e] border border-[#30363d] hover:text-[#ff4d4f] hover:border-[#ff4d4f]/30 transition-colors"
