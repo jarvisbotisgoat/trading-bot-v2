@@ -1,14 +1,13 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import type { Trade, BotStatus, DailySummary } from '@/lib/types';
+import type { Trade, BotStatus } from '@/lib/types';
 import { StatTile } from '@/components/ui/stat-tile';
 import { Card } from '@/components/ui/card';
 import { BotStatusBadge } from '@/components/dashboard/bot-status-badge';
 import { BotToggle } from '@/components/dashboard/bot-toggle';
 import { OpenTradesTable } from '@/components/dashboard/open-trades-table';
 import { WatchlistStrip } from '@/components/dashboard/watchlist-strip';
-import { EquityCurve } from '@/components/charts/equity-curve';
 import { LiveFeed } from '@/components/dashboard/live-feed';
 import { AnimatedBalance } from '@/components/dashboard/animated-balance';
 
@@ -34,7 +33,6 @@ export default function DashboardPage() {
   });
   const [botRunning, setBotRunning] = useState(false);
   const [openTrades, setOpenTrades] = useState<Trade[]>([]);
-  const [equityData, setEquityData] = useState<{ time: string; value: number }[]>([]);
   const [liveStats, setLiveStats] = useState<{
     totalPnl: number;
     todayPnl: number;
@@ -68,10 +66,9 @@ export default function DashboardPage() {
   // Main data fetch (every 15s) — stats, trades, equity
   const fetchData = useCallback(async () => {
     try {
-      const [statusRes, tradesRes, summaryRes, controlRes, statsRes] = await Promise.all([
+      const [statusRes, tradesRes, controlRes, statsRes] = await Promise.all([
         fetch('/api/bot-status'),
         fetch('/api/trades?status=open'),
-        fetch('/api/summary?limit=30'),
         fetch('/api/bot/control'),
         fetch('/api/stats'),
       ]);
@@ -86,19 +83,6 @@ export default function DashboardPage() {
         setOpenTrades(tradesData);
       }
       if (statsRes.ok) setLiveStats(await statsRes.json());
-      if (summaryRes.ok) {
-        const summaries: DailySummary[] = await summaryRes.json();
-        if (summaries.length > 0) {
-          let cumulative = 0;
-          const curve = summaries
-            .reverse()
-            .map((s) => {
-              cumulative += s.total_pnl;
-              return { time: s.date, value: cumulative };
-            });
-          setEquityData(curve);
-        }
-      }
     } catch (err) {
       console.error('Failed to fetch dashboard data:', err);
     }
@@ -198,16 +182,6 @@ export default function DashboardPage() {
       <Card>
         <LiveFeed isRunning={botRunning} onScanComplete={fetchData} />
       </Card>
-
-      {/* Equity Curve */}
-      {equityData.length > 0 && (
-        <Card>
-          <h2 className="text-sm text-[#8b949e] uppercase tracking-wider mb-3">
-            Performance
-          </h2>
-          <EquityCurve data={equityData} />
-        </Card>
-      )}
 
       {/* Open Trades with live P/L */}
       <Card>

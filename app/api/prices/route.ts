@@ -12,26 +12,24 @@ export async function GET(req: NextRequest) {
   const symbols = symbolsParam.split(',').slice(0, 20);
   const prices: Record<string, number> = {};
 
-  const yahooFinance = (await import('yahoo-finance2')).default;
-
-  // Use chart() instead of quote() — chart() works reliably on Vercel serverless
+  // Use Yahoo Finance v8 chart API directly — faster than the npm package
   await Promise.all(
     symbols.map(async (symbol) => {
       try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const result: any = await yahooFinance.chart(symbol, {
-          period1: new Date(Date.now() - 60 * 60 * 1000).toISOString().split('T')[0],
-          interval: '5m' as '1m',
+        const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1m&range=5m`;
+        const res = await fetch(url, {
+          headers: { 'User-Agent': 'Mozilla/5.0' },
+          signal: AbortSignal.timeout(4000),
         });
-        const quotes = result?.quotes;
-        if (quotes && quotes.length > 0) {
-          const last = quotes[quotes.length - 1];
-          if (last.close != null) {
-            prices[symbol] = last.close;
-          }
+        if (!res.ok) return;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const data: any = await res.json();
+        const meta = data?.chart?.result?.[0]?.meta;
+        if (meta?.regularMarketPrice) {
+          prices[symbol] = meta.regularMarketPrice;
         }
       } catch {
-        // skip failed symbol
+        // skip
       }
     })
   );
