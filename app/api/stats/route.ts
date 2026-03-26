@@ -70,6 +70,6 @@ export async function GET() {
     totalTrades: closed.length,
     openTrades: openTrades?.length || 0,
     maxDrawdown,
-    balance: 100_000 + totalPnl,
+    balance: 100 + totalPnl,
   });
 }

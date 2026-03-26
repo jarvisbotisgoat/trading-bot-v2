@@ -13,7 +13,7 @@ import { PnlChart } from '@/components/charts/pnl-chart';
 import { Badge } from '@/components/ui/badge';
 
 const CRYPTO_WATCHLIST = ['BTC-USD', 'ETH-USD', 'SOL-USD'];
-const STARTING_BALANCE = 100_000;
+const STARTING_BALANCE = 100;
 
 function getPositionInfo(trade: Trade): { position_size: number; quantity: number } {
   if (trade.notes) {

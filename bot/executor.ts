@@ -1,10 +1,11 @@
 import { getServiceClient } from '../lib/supabase';
+import { submitOrder, closePosition, getCryptoPrices } from '../lib/alpaca';
 import type { SetupSignal, Trade } from '../lib/types';
 import { log } from './logger';
 
-// Position sizing: allocate this fraction of balance per trade
-const POSITION_ALLOCATION = 0.30; // 30% of balance per trade (3 symbols = ~90% deployed)
-const STARTING_BALANCE = 100_000;
+// Position sizing: $100 starting balance, 30% per trade
+const POSITION_ALLOCATION = 0.30;
+const STARTING_BALANCE = 100;
 
 export interface TradeOpenResult {
   trade: Trade | null;
@@ -40,10 +41,31 @@ export async function openPaperTrade(signal: SetupSignal): Promise<TradeOpenResu
     return { trade: null, error: `Skipped — already have open trade for ${signal.symbol}` };
   }
 
-  // Position sizing: allocate 30% of current balance
+  // Position sizing
   const balance = await getCurrentBalance();
-  const positionSize = Math.floor(balance * POSITION_ALLOCATION);
+  const positionSize = Math.max(1, Math.floor(balance * POSITION_ALLOCATION * 100) / 100);
   const quantity = positionSize / signal.entry_price;
+
+  // Place Alpaca paper order
+  let alpacaOrderId: string | null = null;
+  try {
+    const alpacaSymbol = signal.symbol.replace('-', '/'); // BTC-USD -> BTC/USD
+    const order = await submitOrder({
+      symbol: alpacaSymbol,
+      notional: positionSize,
+      side: 'buy',
+    });
+    alpacaOrderId = order.id;
+    await log('info', `Alpaca order placed: ${signal.symbol} $${positionSize.toFixed(2)}`, {
+      order_id: order.id,
+      status: order.status,
+    });
+  } catch (err) {
+    await log('warn', `Alpaca order failed for ${signal.symbol} — recording trade locally`, {
+      error: String(err),
+    });
+    // Continue to record trade even if Alpaca fails
+  }
 
   const tradeData = {
     symbol: signal.symbol,
@@ -58,7 +80,7 @@ export async function openPaperTrade(signal: SetupSignal): Promise<TradeOpenResu
     risk_percent:
       Math.abs(signal.entry_price - signal.stop_price) / signal.entry_price * 100,
     status: 'open' as const,
-    notes: JSON.stringify({ position_size: positionSize, quantity }),
+    notes: JSON.stringify({ position_size: positionSize, quantity, alpaca_order_id: alpacaOrderId }),
   };
 
   try {
@@ -69,16 +91,15 @@ export async function openPaperTrade(signal: SetupSignal): Promise<TradeOpenResu
       .single();
 
     if (error) {
-      const msg = `Failed to open trade for ${signal.symbol}: ${error.message} (code: ${error.code}, details: ${error.details})`;
-      await log('error', msg, { error: error.message, code: error.code, details: error.details, hint: error.hint });
+      const msg = `Failed to record trade for ${signal.symbol}: ${error.message}`;
+      await log('error', msg, { error: error.message });
       return { trade: null, error: msg };
     }
 
-    await log('info', `Opened paper trade: ${signal.symbol} ${signal.setup_type} — $${positionSize.toLocaleString()} (${quantity.toFixed(4)} units)`, {
+    await log('info', `Opened: ${signal.symbol} ${signal.setup_type} — $${positionSize.toFixed(2)} (${quantity.toFixed(6)} units)`, {
       trade_id: data.id,
       entry: signal.entry_price,
       position_size: positionSize,
-      quantity,
     });
 
     return { trade: data as Trade, error: null };
@@ -90,14 +111,12 @@ export async function openPaperTrade(signal: SetupSignal): Promise<TradeOpenResu
 }
 
 function getPositionInfo(trade: Trade): { position_size: number; quantity: number } {
-  // Parse position info from notes, fall back to default allocation
   if (trade.notes) {
     try {
       const info = JSON.parse(trade.notes);
       if (info.position_size && info.quantity) return info;
     } catch { /* fall through */ }
   }
-  // Fallback for old trades without position sizing
   const positionSize = STARTING_BALANCE * POSITION_ALLOCATION;
   return { position_size: positionSize, quantity: positionSize / trade.entry_price };
 }
@@ -154,6 +173,16 @@ export async function checkAndCloseTrades(
     }
 
     if (shouldClose) {
+      // Close on Alpaca
+      try {
+        const alpacaSymbol = trade.symbol.replace('-', '/');
+        await closePosition(alpacaSymbol);
+        await log('info', `Alpaca position closed: ${trade.symbol}`, {});
+      } catch (err) {
+        await log('warn', `Alpaca close failed for ${trade.symbol}: ${String(err)}`, {});
+        // Continue to record close locally
+      }
+
       const { position_size, quantity } = getPositionInfo(trade);
       const priceChange = isLong
         ? exitPrice - trade.entry_price
@@ -175,16 +204,13 @@ export async function checkAndCloseTrades(
         .eq('id', trade.id);
 
       if (updateError) {
-        await log('error', `Failed to close trade ${trade.id}`, {
-          error: updateError.message,
-        });
+        await log('error', `Failed to close trade ${trade.id}`, { error: updateError.message });
         continue;
       }
 
-      await log('info', `Closed trade: ${trade.symbol} ${outcome} — ${pnlDollars >= 0 ? '+' : ''}$${pnlDollars.toFixed(2)} (${pnlPercent.toFixed(1)}%)`, {
+      await log('info', `Closed: ${trade.symbol} ${outcome} — ${pnlDollars >= 0 ? '+' : ''}$${pnlDollars.toFixed(2)} (${pnlPercent.toFixed(1)}%)`, {
         trade_id: trade.id,
         pnl: pnlDollars,
-        position_size,
       });
     }
   }
