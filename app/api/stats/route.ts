@@ -6,17 +6,19 @@ export const dynamic = 'force-dynamic';
 export async function GET() {
   const supabase = getServiceClient();
 
-  // Fetch all closed trades for cumulative stats
+  // Fetch all closed trades for cumulative stats (only after reset date)
   const { data: closedTrades, error: closedErr } = await supabase
     .from('trades')
     .select('pnl_dollars, pnl_percent, outcome, exit_time, entry_time')
-    .eq('status', 'closed');
+    .eq('status', 'closed')
+    .gte('created_at', '2026-03-27');
 
-  // Fetch open trade count
+  // Fetch open trade count (only after reset date)
   const { data: openTrades, error: openErr } = await supabase
     .from('trades')
     .select('id')
-    .eq('status', 'open');
+    .eq('status', 'open')
+    .gte('created_at', '2026-03-27');
 
   if (closedErr || openErr) {
     return NextResponse.json(

@@ -78,13 +78,21 @@ export default function DashboardPage() {
       }
       if (openRes.ok) {
         const openData = await openRes.json();
-        console.log('TRADES API RETURNED:', openData?.length, 'open trades');
-        setOpenTrades(Array.isArray(openData) ? openData : []);
+        // Filter: only show trades from after the reset (2026-03-27+)
+        const fresh = Array.isArray(openData) ? openData.filter((t: Trade) =>
+          new Date(t.created_at) > new Date('2026-03-27')
+        ) : [];
+        setOpenTrades(fresh);
       } else {
-        console.log('TRADES API ERROR:', openRes.status);
         setOpenTrades([]);
       }
-      if (closedRes.ok) setClosedTrades(await closedRes.json());
+      if (closedRes.ok) {
+        const closedData = await closedRes.json();
+        const fresh = Array.isArray(closedData) ? closedData.filter((t: Trade) =>
+          new Date(t.created_at) > new Date('2026-03-27')
+        ) : [];
+        setClosedTrades(fresh);
+      }
       if (statsRes.ok) setLiveStats(await statsRes.json());
       if (pnlRes.ok) setPnlHistory(await pnlRes.json());
     } catch (err) {
@@ -123,10 +131,12 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-4">
-      {/* DEBUG BANNER — remove after fixing */}
-      <div className="bg-yellow-900/30 border border-yellow-600/50 rounded p-2 text-xs text-yellow-400">
-        {debugInfo}
-      </div>
+      {/* DEBUG — remove later */}
+      {(openTrades.length > 0 || closedTrades.length > 0) && (
+        <div className="bg-yellow-900/30 border border-yellow-600/50 rounded p-2 text-xs text-yellow-400">
+          {debugInfo}
+        </div>
+      )}
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
