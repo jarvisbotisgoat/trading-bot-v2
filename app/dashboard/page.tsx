@@ -26,7 +26,6 @@ export default function DashboardPage() {
     openTrades: number; maxDrawdown: number; balance: number;
   } | null>(null);
   const [currentPrices, setCurrentPrices] = useState<Record<string, number>>({});
-  const [prevPrices, setPrevPrices] = useState<Record<string, number>>({});
   const [pnlHistory, setPnlHistory] = useState<{ time: number; value: number }[]>([]);
 
   // Compute unrealized P/L from live prices
@@ -46,7 +45,26 @@ export default function DashboardPage() {
   const wins = liveStats?.wins ?? 0;
   const losses = liveStats?.losses ?? 0;
   const maxDrawdown = liveStats?.maxDrawdown ?? 0;
-  const totalPnl = liveStats?.totalPnl ?? 0;
+  const totalPnl = (liveStats?.totalPnl ?? 0) + unrealizedPnl;
+
+  // Build live equity curve: closed trade history + current unrealized as latest point
+  const liveEquityData = [...pnlHistory];
+  if (openTrades.length > 0 || liveEquityData.length > 0) {
+    // Add current moment as the latest data point with unrealized P/L
+    const now = Math.floor(Date.now() / 1000);
+    const lastClosed = liveEquityData.length > 0 ? liveEquityData[liveEquityData.length - 1].value : 0;
+    liveEquityData.push({ time: now, value: lastClosed + unrealizedPnl });
+  }
+  // If we have open trades but no closed history, add a starting zero point
+  if (liveEquityData.length === 1 && openTrades.length > 0) {
+    const earliest = openTrades.reduce((min, t) => {
+      const ts = new Date(t.entry_time).getTime() / 1000;
+      return ts < min ? ts : min;
+    }, Infinity);
+    if (earliest < Infinity) {
+      liveEquityData.unshift({ time: Math.floor(earliest), value: 0 });
+    }
+  }
 
   // Main data fetch (every 15s)
   const fetchData = useCallback(async () => {
@@ -96,30 +114,27 @@ export default function DashboardPage() {
     return () => clearInterval(interval);
   }, [fetchData]);
 
-  // Fast price polling (every 5s)
+  // Fast price polling (every 3s)
   const fetchPrices = useCallback(async () => {
     try {
       const res = await fetch(`/api/prices?symbols=${CRYPTO_WATCHLIST.join(',')}&_t=${Date.now()}`, { cache: 'no-store' });
       if (res.ok) {
         const newPrices = await res.json();
-        setCurrentPrices((prev) => {
-          setPrevPrices(prev);
-          return { ...prev, ...newPrices };
-        });
+        setCurrentPrices((prev) => ({ ...prev, ...newPrices }));
       }
     } catch { /* silent */ }
   }, []);
 
   useEffect(() => {
     fetchPrices();
-    const interval = setInterval(fetchPrices, 5000);
+    const interval = setInterval(fetchPrices, 3000);
     return () => clearInterval(interval);
   }, [fetchPrices]);
 
   return (
     <div className="space-y-4">
       {/* Ticker Bar */}
-      <TickerBar prices={currentPrices} prevPrices={prevPrices} />
+      <TickerBar prices={currentPrices} />
 
       {/* Header */}
       <div className="flex items-center justify-between">
@@ -161,7 +176,7 @@ export default function DashboardPage() {
           Equity Curve
         </h2>
         <PnlChart
-          data={pnlHistory}
+          data={liveEquityData}
           stats={{ totalPnl, winRate, wins, losses, maxDrawdown }}
           height={250}
         />

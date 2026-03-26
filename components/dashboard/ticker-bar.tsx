@@ -1,14 +1,9 @@
 'use client';
 
-interface TickerItem {
-  label: string;
-  price: number | null;
-  change: number;
-}
+import { useRef } from 'react';
 
 interface TickerBarProps {
   prices: Record<string, number>;
-  prevPrices: Record<string, number>;
 }
 
 const TICKERS = [
@@ -17,31 +12,40 @@ const TICKERS = [
   { key: 'SOL-USD', label: 'SOL' },
 ];
 
-export function TickerBar({ prices, prevPrices }: TickerBarProps) {
-  const items: TickerItem[] = TICKERS.map(t => {
-    const price = prices[t.key] ?? null;
-    const prev = prevPrices[t.key] ?? price;
-    const change = price && prev ? ((price - prev) / prev) * 100 : 0;
-    return { label: t.label, price, change };
-  });
+export function TickerBar({ prices }: TickerBarProps) {
+  // Track the first price we ever saw for each symbol (session baseline)
+  const baselinePrices = useRef<Record<string, number>>({});
+
+  // Set baseline on first price received
+  for (const t of TICKERS) {
+    if (prices[t.key] && !baselinePrices.current[t.key]) {
+      baselinePrices.current[t.key] = prices[t.key];
+    }
+  }
 
   return (
-    <div className="flex items-center gap-4 px-4 py-2 bg-[#0d1117] border-b border-[#21262d] overflow-x-auto text-xs">
-      {items.map(item => {
-        const isUp = item.change >= 0;
+    <div className="flex items-center gap-5 px-4 py-2 bg-[#0d1117] border-b border-[#21262d] overflow-x-auto text-xs">
+      {TICKERS.map(t => {
+        const price = prices[t.key];
+        const baseline = baselinePrices.current[t.key];
+        const change = price && baseline ? ((price - baseline) / baseline) * 100 : 0;
+        const isUp = change >= 0;
+
         return (
-          <div key={item.label} className="flex items-center gap-1.5 shrink-0">
-            <span className="text-[#8b949e] font-medium">{item.label}</span>
+          <div key={t.key} className="flex items-center gap-1.5 shrink-0">
+            <span className="text-[#8b949e] font-medium">{t.label}</span>
             <span className="text-white font-medium" style={{ fontFeatureSettings: '"tnum"' }}>
-              {item.price
-                ? item.price >= 1000
-                  ? `$${item.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                  : `$${item.price.toFixed(2)}`
+              {price
+                ? price >= 1000
+                  ? `$${price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                  : `$${price.toFixed(2)}`
                 : '—'}
             </span>
-            <span className={`${isUp ? 'text-[#00d4aa]' : 'text-[#ff4d4f]'}`}>
-              {isUp ? '▲' : '▼'} {Math.abs(item.change).toFixed(2)}%
-            </span>
+            {price && (
+              <span className={isUp ? 'text-[#00d4aa]' : 'text-[#ff4d4f]'}>
+                {isUp ? '▲' : '▼'} {Math.abs(change).toFixed(2)}%
+              </span>
+            )}
           </div>
         );
       })}
