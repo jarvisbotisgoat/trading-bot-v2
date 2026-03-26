@@ -22,8 +22,6 @@ export const metadata: Metadata = {
 const navItems = [
   { href: '/dashboard', label: 'Dashboard' },
   { href: '/trades', label: 'Trades' },
-  { href: '/learning', label: 'Learning' },
-  { href: '/plan', label: 'Plan' },
 ];
 
 export default function RootLayout({

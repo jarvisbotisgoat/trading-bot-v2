@@ -4,7 +4,6 @@ import type { PriceBar } from '../lib/types';
 import { detectSetups } from './strategy';
 import { openPaperTrade, checkAndCloseTrades } from './executor';
 import { log } from './logger';
-import { runDailyScoring } from './scorer';
 import 'dotenv/config';
 
 const LOOP_INTERVAL = (parseInt(process.env.BOT_LOOP_INTERVAL_SECONDS || '60', 10)) * 1000;
@@ -99,14 +98,7 @@ async function runLoop(): Promise<void> {
 }
 
 async function checkMarketClose(): Promise<void> {
-  const now = new Date();
-  const etHour = now.getUTCHours() - 4; // Rough ET offset
-  const etMin = now.getUTCMinutes();
-
-  // Run daily scoring at ~4:05 PM ET
-  if (etHour === 16 && etMin >= 5 && etMin <= 10) {
-    await runDailyScoring();
-  }
+  // placeholder for end-of-day logic
 }
 
 async function main() {
