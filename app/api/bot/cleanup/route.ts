@@ -1,29 +1,68 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { getServiceClient } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-
-  // Try service client first, fall back to anon
-  const supabase = createClient(url, serviceKey || anonKey);
+  // Use the EXACT same client that trades API uses successfully
+  const supabase = getServiceClient();
+  const results: string[] = [];
 
   // Stop bot
   await supabase.from('bot_control').update({ is_running: false }).eq('id', 1);
+  results.push('bot stopped');
 
-  // Delete in order: summaries (FK) -> trades -> logs
-  await supabase.from('daily_summary').delete().gte('date', '2000-01-01');
-  await supabase.from('trades').delete().gte('created_at', '2000-01-01');
-  await supabase.from('bot_log').delete().gte('created_at', '2000-01-01');
+  // First: read trades to confirm we can see them
+  const { data: allTrades, error: readErr } = await supabase
+    .from('trades')
+    .select('id, status')
+    .limit(500);
 
-  return NextResponse.json({ message: 'Reset complete' }, {
-    headers: {
-      'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
-      'CDN-Cache-Control': 'no-store',
-      'Vercel-CDN-Cache-Control': 'no-store',
-    },
-  });
+  results.push(`read: ${readErr ? 'ERROR ' + readErr.message : (allTrades?.length ?? 0) + ' trades'}`);
+
+  if (!allTrades || allTrades.length === 0) {
+    return NextResponse.json({ results }, { headers: { 'Cache-Control': 'no-store' } });
+  }
+
+  // Null out FK references in daily_summary first
+  const { error: fkErr } = await supabase
+    .from('daily_summary')
+    .update({ best_trade_id: null, worst_trade_id: null })
+    .not('id', 'is', null);
+  results.push(`null FKs: ${fkErr ? 'ERROR ' + fkErr.message : 'ok'}`);
+
+  // Delete daily_summary
+  const { error: dsErr } = await supabase
+    .from('daily_summary')
+    .delete()
+    .not('id', 'is', null);
+  results.push(`del summary: ${dsErr ? 'ERROR ' + dsErr.message : 'ok'}`);
+
+  // Delete trades in batches by ID
+  const ids = allTrades.map(t => t.id);
+  let totalDeleted = 0;
+
+  for (let i = 0; i < ids.length; i += 20) {
+    const batch = ids.slice(i, i + 20);
+    const { error: bErr, count } = await supabase
+      .from('trades')
+      .delete({ count: 'exact' })
+      .in('id', batch);
+
+    if (bErr) {
+      results.push(`batch ${i}: ERROR ${bErr.message}`);
+      break;
+    }
+    totalDeleted += count ?? 0;
+  }
+  results.push(`deleted ${totalDeleted} trades`);
+
+  // Delete logs
+  await supabase.from('bot_log').delete().not('id', 'is', null);
+
+  // Verify
+  const { data: check } = await supabase.from('trades').select('id').limit(1);
+  results.push(`remaining: ${check?.length ?? '?'}`);
+
+  return NextResponse.json({ results }, { headers: { 'Cache-Control': 'no-store' } });
 }
