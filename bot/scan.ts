@@ -7,6 +7,7 @@ import { openPaperTrade, checkAndCloseTrades } from './executor';
 import { log } from './logger';
 import { getActiveWatchlist, displaySymbol, isMarketOpen } from './market-hours';
 import { fetchCryptoBars } from './crypto-fetch';
+import { computeVWAP } from '../lib/utils';
 
 async function fetchStockBars(symbol: string): Promise<PriceBar[]> {
   try {
@@ -34,17 +35,6 @@ async function fetchStockBars(symbol: string): Promise<PriceBar[]> {
     await log('warn', `Failed to fetch bars for ${symbol}`, { error: String(err) });
     return [];
   }
-}
-
-function computeVWAP(bars: PriceBar[]): number {
-  let cumulativeTPV = 0;
-  let cumulativeVolume = 0;
-  for (const bar of bars) {
-    const typicalPrice = (bar.high + bar.low + bar.close) / 3;
-    cumulativeTPV += typicalPrice * bar.volume;
-    cumulativeVolume += bar.volume;
-  }
-  return cumulativeVolume > 0 ? cumulativeTPV / cumulativeVolume : 0;
 }
 
 async function getOpenSymbols(): Promise<Set<string>> {

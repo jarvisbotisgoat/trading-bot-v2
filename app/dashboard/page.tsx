@@ -11,20 +11,9 @@ import { LiveFeed } from '@/components/dashboard/live-feed';
 import { AnimatedBalance } from '@/components/dashboard/animated-balance';
 import { PnlChart } from '@/components/charts/pnl-chart';
 import { Badge } from '@/components/ui/badge';
+import { getPositionInfo, STARTING_BALANCE } from '@/lib/utils';
 
 const CRYPTO_WATCHLIST = ['BTC-USD', 'ETH-USD', 'SOL-USD'];
-const STARTING_BALANCE = 100;
-
-function getPositionInfo(trade: Trade): { position_size: number; quantity: number } {
-  if (trade.notes) {
-    try {
-      const info = JSON.parse(trade.notes);
-      if (info.position_size && info.quantity) return info;
-    } catch { /* ignore */ }
-  }
-  const ps = STARTING_BALANCE * 0.3;
-  return { position_size: ps, quantity: ps / trade.entry_price };
-}
 
 export default function DashboardPage() {
   const [botStatus, setBotStatus] = useState<BotStatus>({ status: 'idle', lastRun: null, openTrades: 0 });
@@ -80,7 +69,7 @@ export default function DashboardPage() {
         const openData = await openRes.json();
         // Filter: only show trades from after the reset (2026-03-27+)
         const fresh = Array.isArray(openData) ? openData.filter((t: Trade) =>
-          new Date(t.created_at) > new Date('2026-03-27')
+          new Date(t.created_at) > new Date('2026-03-27T00:00:00Z')
         ) : [];
         setOpenTrades(fresh);
       } else {
@@ -89,7 +78,7 @@ export default function DashboardPage() {
       if (closedRes.ok) {
         const closedData = await closedRes.json();
         const fresh = Array.isArray(closedData) ? closedData.filter((t: Trade) =>
-          new Date(t.created_at) > new Date('2026-03-27')
+          new Date(t.created_at) > new Date('2026-03-27T00:00:00Z')
         ) : [];
         setClosedTrades(fresh);
       }
@@ -126,17 +115,8 @@ export default function DashboardPage() {
     return () => clearInterval(interval);
   }, [fetchPrices]);
 
-  // Debug: show what the API actually returned
-  const debugInfo = `API: ${openTrades.length} open, ${closedTrades.length} closed, balance=$${liveBalance.toFixed(2)}`;
-
   return (
     <div className="space-y-4">
-      {/* DEBUG — remove later */}
-      {(openTrades.length > 0 || closedTrades.length > 0) && (
-        <div className="bg-yellow-900/30 border border-yellow-600/50 rounded p-2 text-xs text-yellow-400">
-          {debugInfo}
-        </div>
-      )}
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">

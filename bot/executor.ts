@@ -1,11 +1,8 @@
 import { getServiceClient } from '../lib/supabase';
-import { submitOrder, closePosition, getCryptoPrices } from '../lib/alpaca';
+import { submitOrder, closePosition } from '../lib/alpaca';
 import type { SetupSignal, Trade } from '../lib/types';
 import { log } from './logger';
-
-// Position sizing: $100 starting balance, 30% per trade
-const POSITION_ALLOCATION = 0.30;
-const STARTING_BALANCE = 100;
+import { STARTING_BALANCE, POSITION_ALLOCATION, getPositionInfo } from '../lib/utils';
 
 export interface TradeOpenResult {
   trade: Trade | null;
@@ -108,17 +105,6 @@ export async function openPaperTrade(signal: SetupSignal): Promise<TradeOpenResu
     await log('error', msg, { error: String(err) });
     return { trade: null, error: msg };
   }
-}
-
-function getPositionInfo(trade: Trade): { position_size: number; quantity: number } {
-  if (trade.notes) {
-    try {
-      const info = JSON.parse(trade.notes);
-      if (info.position_size && info.quantity) return info;
-    } catch { /* fall through */ }
-  }
-  const positionSize = STARTING_BALANCE * POSITION_ALLOCATION;
-  return { position_size: positionSize, quantity: positionSize / trade.entry_price };
 }
 
 export async function checkAndCloseTrades(

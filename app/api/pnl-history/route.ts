@@ -11,7 +11,7 @@ export async function GET() {
     .select('exit_time, pnl_dollars')
     .eq('status', 'closed')
     .not('exit_time', 'is', null)
-    .gte('created_at', '2026-03-27')
+    .gte('created_at', process.env.RESET_CUTOFF_DATE || '2026-03-27')
     .order('exit_time', { ascending: true });
 
   if (error) {

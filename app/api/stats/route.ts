@@ -11,14 +11,14 @@ export async function GET() {
     .from('trades')
     .select('pnl_dollars, pnl_percent, outcome, exit_time, entry_time')
     .eq('status', 'closed')
-    .gte('created_at', '2026-03-27');
+    .gte('created_at', process.env.RESET_CUTOFF_DATE || '2026-03-27');
 
   // Fetch open trade count (only after reset date)
   const { data: openTrades, error: openErr } = await supabase
     .from('trades')
     .select('id')
     .eq('status', 'open')
-    .gte('created_at', '2026-03-27');
+    .gte('created_at', process.env.RESET_CUTOFF_DATE || '2026-03-27');
 
   if (closedErr || openErr) {
     return NextResponse.json(

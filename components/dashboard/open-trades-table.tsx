@@ -2,20 +2,11 @@
 
 import type { Trade } from '@/lib/types';
 import { Badge } from '../ui/badge';
+import { getPositionInfo } from '@/lib/utils';
 
 interface OpenTradesTableProps {
   trades: Trade[];
   currentPrices?: Record<string, number>;
-}
-
-function getPositionInfo(trade: Trade): { position_size: number; quantity: number } | null {
-  if (trade.notes) {
-    try {
-      const info = JSON.parse(trade.notes);
-      if (info.position_size && info.quantity) return info;
-    } catch { /* ignore */ }
-  }
-  return null;
 }
 
 export function OpenTradesTable({ trades, currentPrices = {} }: OpenTradesTableProps) {
@@ -44,9 +35,7 @@ export function OpenTradesTable({ trades, currentPrices = {} }: OpenTradesTableP
         <tbody>
           {trades.map((trade) => {
             const current = currentPrices[trade.symbol] || trade.entry_price;
-            const posInfo = getPositionInfo(trade);
-            const positionSize = posInfo?.position_size ?? 30;
-            const quantity = posInfo?.quantity ?? (positionSize / trade.entry_price);
+            const { position_size: positionSize, quantity } = getPositionInfo(trade);
             const isLong = trade.target_price > trade.entry_price;
             const priceChange = isLong
               ? current - trade.entry_price
