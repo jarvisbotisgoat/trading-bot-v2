@@ -76,7 +76,14 @@ export default function DashboardPage() {
         const control = await controlRes.json();
         setBotRunning(control.is_running || false);
       }
-      if (openRes.ok) setOpenTrades(await openRes.json());
+      if (openRes.ok) {
+        const openData = await openRes.json();
+        console.log('TRADES API RETURNED:', openData?.length, 'open trades');
+        setOpenTrades(Array.isArray(openData) ? openData : []);
+      } else {
+        console.log('TRADES API ERROR:', openRes.status);
+        setOpenTrades([]);
+      }
       if (closedRes.ok) setClosedTrades(await closedRes.json());
       if (statsRes.ok) setLiveStats(await statsRes.json());
       if (pnlRes.ok) setPnlHistory(await pnlRes.json());
@@ -111,8 +118,15 @@ export default function DashboardPage() {
     return () => clearInterval(interval);
   }, [fetchPrices]);
 
+  // Debug: show what the API actually returned
+  const debugInfo = `API: ${openTrades.length} open, ${closedTrades.length} closed, balance=$${liveBalance.toFixed(2)}`;
+
   return (
     <div className="space-y-4">
+      {/* DEBUG BANNER — remove after fixing */}
+      <div className="bg-yellow-900/30 border border-yellow-600/50 rounded p-2 text-xs text-yellow-400">
+        {debugInfo}
+      </div>
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
