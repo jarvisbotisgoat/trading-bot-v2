@@ -6,10 +6,10 @@ import { Card } from '@/components/ui/card';
 import { BotStatusBadge } from '@/components/dashboard/bot-status-badge';
 import { BotToggle } from '@/components/dashboard/bot-toggle';
 import { OpenTradesTable } from '@/components/dashboard/open-trades-table';
-import { WatchlistStrip } from '@/components/dashboard/watchlist-strip';
 import { LiveFeed } from '@/components/dashboard/live-feed';
 import { AnimatedBalance } from '@/components/dashboard/animated-balance';
 import { PnlChart } from '@/components/charts/pnl-chart';
+import { TickerBar } from '@/components/dashboard/ticker-bar';
 import { Badge } from '@/components/ui/badge';
 import { getPositionInfo, STARTING_BALANCE } from '@/lib/utils';
 
@@ -45,8 +45,10 @@ export default function DashboardPage() {
   const winRate = liveStats?.winRate ?? 0;
   const wins = liveStats?.wins ?? 0;
   const losses = liveStats?.losses ?? 0;
+  const maxDrawdown = liveStats?.maxDrawdown ?? 0;
+  const totalPnl = liveStats?.totalPnl ?? 0;
 
-  // Main data fetch (every 15s) — cache-bust to avoid Vercel edge cache
+  // Main data fetch (every 15s)
   const fetchData = useCallback(async () => {
     try {
       const cb = `_t=${Date.now()}`;
@@ -67,7 +69,6 @@ export default function DashboardPage() {
       }
       if (openRes.ok) {
         const openData = await openRes.json();
-        // Filter: only show trades from after the reset (2026-03-27+)
         const fresh = Array.isArray(openData) ? openData.filter((t: Trade) =>
           new Date(t.created_at) > new Date('2026-03-27T00:00:00Z')
         ) : [];
@@ -117,6 +118,9 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-4">
+      {/* Ticker Bar */}
+      <TickerBar prices={currentPrices} prevPrices={prevPrices} />
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -151,19 +155,16 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Watchlist with live prices */}
-      <WatchlistStrip
-        symbols={CRYPTO_WATCHLIST}
-        prices={currentPrices}
-        prevPrices={prevPrices}
-      />
-
-      {/* P/L Chart */}
+      {/* Equity Curve with Stats */}
       <Card>
         <h2 className="text-sm text-[#8b949e] uppercase tracking-wider mb-2">
-          Bot P/L
+          Equity Curve
         </h2>
-        <PnlChart data={pnlHistory} height={220} />
+        <PnlChart
+          data={pnlHistory}
+          stats={{ totalPnl, winRate, wins, losses, maxDrawdown }}
+          height={250}
+        />
       </Card>
 
       {/* Live Feed */}
@@ -171,15 +172,13 @@ export default function DashboardPage() {
         <LiveFeed isRunning={botRunning} onScanComplete={fetchData} />
       </Card>
 
-      {/* Open Trades */}
-      {openTrades.length > 0 && (
-        <Card>
-          <h2 className="text-sm text-[#8b949e] uppercase tracking-wider mb-3">
-            Open Positions ({openTrades.length})
-          </h2>
-          <OpenTradesTable trades={openTrades} currentPrices={currentPrices} />
-        </Card>
-      )}
+      {/* Open Positions */}
+      <Card>
+        <h2 className="text-sm text-[#8b949e] uppercase tracking-wider mb-3">
+          Open Positions ({openTrades.length})
+        </h2>
+        <OpenTradesTable trades={openTrades} currentPrices={currentPrices} />
+      </Card>
 
       {/* Recent Closed Trades */}
       {closedTrades.length > 0 && (

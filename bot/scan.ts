@@ -8,6 +8,7 @@ import { log } from './logger';
 import { getActiveWatchlist, displaySymbol, isMarketOpen } from './market-hours';
 import { fetchCryptoBars } from './crypto-fetch';
 import { computeVWAP } from '../lib/utils';
+import { reconcilePositions, hasAlpacaKeys } from '../lib/position-sync';
 
 async function fetchStockBars(symbol: string): Promise<PriceBar[]> {
   try {
@@ -174,6 +175,18 @@ export async function runScan(): Promise<ScanResult[]> {
     watchlist: WATCHLIST.map(displaySymbol),
     mode,
   });
+
+  // Reconcile: close stale DB trades that no longer exist on Alpaca
+  if (hasAlpacaKeys()) {
+    try {
+      const syncActions = await reconcilePositions();
+      for (const action of syncActions) {
+        await log('info', `Sync: ${action}`, {});
+      }
+    } catch (err) {
+      await log('warn', `Position sync failed: ${String(err)}`, {});
+    }
+  }
 
   const openSymbols = await getOpenSymbols();
   const currentPrices: Record<string, number> = {};
