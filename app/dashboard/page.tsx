@@ -146,6 +146,9 @@ export default function DashboardPage() {
             </span>
             <span className="text-xs text-[#8b949e]">
               {wins}W {losses}L · {(winRate * 100).toFixed(0)}% win rate
+              {botStatus.lastRun && (
+                <> · Last scan: {Math.round((Date.now() - new Date(botStatus.lastRun).getTime()) / 1000)}s ago</>
+              )}
             </span>
           </div>
         </div>
@@ -178,6 +181,7 @@ export default function DashboardPage() {
         <PnlChart
           data={liveEquityData}
           stats={{ totalPnl, winRate, wins, losses, maxDrawdown }}
+          hasOpenTrades={openTrades.length > 0}
           height={250}
         />
       </Card>

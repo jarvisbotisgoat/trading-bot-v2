@@ -11,10 +11,11 @@ interface PnlChartProps {
     losses: number;
     maxDrawdown: number;
   };
+  hasOpenTrades?: boolean;
   height?: number;
 }
 
-export function PnlChart({ data, stats, height = 250 }: PnlChartProps) {
+export function PnlChart({ data, stats, hasOpenTrades = false, height = 250 }: PnlChartProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -118,7 +119,7 @@ export function PnlChart({ data, stats, height = 250 }: PnlChartProps) {
     <div className="flex gap-4">
       {/* Chart */}
       <div className="flex-1 min-w-0">
-        {data.length < 2 ? (
+        {data.length < 2 && !hasOpenTrades ? (
           <div className="flex items-center justify-center text-[#484f58] text-sm" style={{ height }}>
             Waiting for first trade...
           </div>

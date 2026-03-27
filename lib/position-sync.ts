@@ -1,82 +1,66 @@
 import { getServiceClient } from './supabase';
 import { getPositions } from './alpaca';
-
+import { log } from '../bot/logger';
 
 /**
- * Reconcile Supabase trades with actual Alpaca positions.
- * Closes stale DB rows that no longer exist on Alpaca.
- * Called at the start of every scan to prevent phantom "open trade" blocks.
+ * Aggressive reconciliation: DELETE any Supabase "open" trades
+ * that don't exist as actual positions on Alpaca.
  */
-export async function reconcilePositions(): Promise<string[]> {
+export async function reconcilePositions(): Promise<void> {
   const supabase = getServiceClient();
-  const actions: string[] = [];
 
   // 1. Get real Alpaca positions
   let alpacaSymbols: Set<string>;
   try {
     const positions = await getPositions();
-    // Alpaca returns symbols like "BTCUSD" — convert to our "BTC-USD" format
     alpacaSymbols = new Set(
       positions.map(p => {
-        // Handle both "BTCUSD" and "BTC/USD" formats
         const raw = p.symbol.replace('/', '');
-        // Insert dash before USD: BTCUSD -> BTC-USD
         if (raw.endsWith('USD') && raw.length > 3) {
           return raw.slice(0, -3) + '-USD';
         }
         return p.symbol;
       })
     );
-    actions.push(`alpaca: ${positions.length} positions (${Array.from(alpacaSymbols).join(', ') || 'none'})`);
+    await log('info', `[RECONCILE] Alpaca: ${positions.length} positions (${Array.from(alpacaSymbols).join(', ') || 'none'})`, {});
   } catch (err) {
-    // If Alpaca is unreachable, don't touch anything
-    actions.push(`alpaca unreachable: ${String(err)}`);
-    return actions;
+    await log('warn', `[RECONCILE] Alpaca unreachable: ${String(err)}`, {});
+    return;
   }
 
-  // 2. Get all "open" trades from Supabase
+  // 2. Get all "open" trades from Supabase (including pre-reset ghost trades)
   const { data: dbOpenTrades, error } = await supabase
     .from('trades')
-    .select('id, symbol, created_at')
+    .select('id, symbol')
     .eq('status', 'open');
 
   if (error || !dbOpenTrades) {
-    actions.push(`db read error: ${error?.message || 'no data'}`);
-    return actions;
+    await log('warn', `[RECONCILE] DB read failed: ${error?.message || 'no data'}`, {});
+    return;
   }
 
-  actions.push(`db: ${dbOpenTrades.length} open trades`);
-
-  // 3. Close stale DB rows — trades marked "open" in DB but NOT on Alpaca
+  // 3. DELETE stale rows — anything "open" in DB but NOT on Alpaca
   const stale = dbOpenTrades.filter(t => !alpacaSymbols.has(t.symbol));
-
   if (stale.length > 0) {
-    for (const trade of stale) {
-      const { error: closeErr } = await supabase
+    const ids = stale.map(t => t.id);
+    const { error: delErr } = await supabase
+      .from('trades')
+      .delete()
+      .in('id', ids);
+
+    if (delErr) {
+      // Fallback: update to closed if delete fails
+      await supabase
         .from('trades')
-        .update({
-          status: 'closed',
-          exit_time: new Date().toISOString(),
-          outcome: 'breakeven',
-          pnl_dollars: 0,
-          pnl_percent: 0,
-          failure_reason: 'Position closed on Alpaca (reconciliation)',
-        })
-        .eq('id', trade.id);
-
-      if (closeErr) {
-        actions.push(`failed to close stale ${trade.symbol}: ${closeErr.message}`);
-      }
+        .update({ status: 'closed', exit_time: new Date().toISOString(), outcome: 'breakeven', pnl_dollars: 0, pnl_percent: 0, failure_reason: 'Reconciliation' })
+        .in('id', ids);
     }
-    actions.push(`closed ${stale.length} stale DB trades: ${stale.map(t => t.symbol).join(', ')}`);
+    await log('info', `[RECONCILE] Cleared ${stale.length} stale trades: ${stale.map(t => t.symbol).join(', ')}`, {});
+  } else {
+    await log('info', `[RECONCILE] Clean — ${dbOpenTrades.length} DB trades match ${alpacaSymbols.size} Alpaca positions`, {});
   }
-
-  return actions;
 }
 
-/**
- * Check if Alpaca keys are configured.
- */
 export function hasAlpacaKeys(): boolean {
   return !!(process.env.ALPACA_API_KEY && process.env.ALPACA_API_SECRET);
 }

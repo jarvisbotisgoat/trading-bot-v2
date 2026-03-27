@@ -14,15 +14,15 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  // Check if bot is enabled
   const supabase = getServiceClient();
+
+  // Check if bot is enabled
   const { data: control } = await supabase
     .from('bot_control')
     .select('is_running')
     .eq('id', 1)
     .single();
 
-  // Default to running if no control row exists
   if (control && !control.is_running) {
     return NextResponse.json({ status: 'skipped', reason: 'Bot is stopped' });
   }
@@ -30,13 +30,22 @@ export async function GET(req: NextRequest) {
   try {
     const results = await runScan();
     const signals = results.filter(r => r.signals_found > 0);
+    const trades = results.filter(r => r.trade_opened);
+
     return NextResponse.json({
       status: 'completed',
       scanned: results.length,
       signals: signals.length,
+      trades_opened: trades.length,
       timestamp: new Date().toISOString(),
     });
   } catch (err) {
+    // Log the error so it appears in the feed
+    await supabase.from('bot_log').insert({
+      level: 'error',
+      message: `Cron scan error: ${String(err)}`,
+      metadata: { error: String(err) },
+    });
     return NextResponse.json(
       { status: 'error', error: String(err) },
       { status: 500 }

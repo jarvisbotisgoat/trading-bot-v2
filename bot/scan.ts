@@ -181,10 +181,7 @@ export async function runScan(): Promise<ScanResult[]> {
   // Reconcile: close stale DB trades that no longer exist on Alpaca
   if (hasAlpacaKeys()) {
     try {
-      const syncActions = await reconcilePositions();
-      for (const action of syncActions) {
-        await log('info', `Sync: ${action}`, {});
-      }
+      await reconcilePositions();
     } catch (err) {
       await log('warn', `Position sync failed: ${String(err)}`, {});
     }
@@ -297,9 +294,13 @@ export async function runScan(): Promise<ScanResult[]> {
   await checkAndCloseTrades(currentPrices);
   await savePlannedSetups(plannedSetups);
 
-  await log('info', `Bot scan completed — ${mode} mode`, {
+  const signalCount = results.filter((r) => r.signals_found > 0).length;
+  const tradeCount = results.filter((r) => r.trade_opened).length;
+  const skippedCount = results.filter((r) => r.skipped).length;
+  await log('info', `Scan done — ${results.length} symbols, ${signalCount} signals, ${tradeCount} trades opened, ${skippedCount} monitoring`, {
     scanned: results.length,
-    signals: results.filter((r) => r.signals_found > 0).length,
+    signals: signalCount,
+    trades: tradeCount,
     mode,
   });
 
