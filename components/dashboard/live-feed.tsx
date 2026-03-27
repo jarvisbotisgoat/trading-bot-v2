@@ -17,24 +17,6 @@ interface BotLogEntry {
   meta?: Record<string, unknown>;
 }
 
-interface ScanResult {
-  symbol: string;
-  price: number;
-  bars_count: number;
-  vwap: number;
-  signals_found: number;
-  skipped: boolean;
-  signal_type?: string;
-  wave_analysis?: {
-    trend: string;
-    rsi: number;
-    emaSpread: number;
-    volumeRatio: number;
-  };
-  trade_opened?: boolean;
-  trade_error?: string;
-}
-
 interface LiveFeedProps {
   isRunning: boolean;
   onScanComplete?: () => void;
@@ -51,10 +33,6 @@ function formatTime(iso: string): string {
 
 function now(): string {
   return formatTime(new Date().toISOString());
-}
-
-function displaySymbol(s: string): string {
-  return s.replace('-USD', '');
 }
 
 let lineId = 100000;
@@ -90,67 +68,17 @@ function getColor(line: FeedLine): string {
 
 export function LiveFeed({ isRunning, onScanComplete }: LiveFeedProps) {
   const [lines, setLines] = useState<FeedLine[]>([]);
-  const [scanning, setScanning] = useState(false);
+  const scanning = false; // scanning happens server-side via cron
   const [lastFetch, setLastFetch] = useState<string | null>(null);
   const feedRef = useRef<HTMLDivElement>(null);
   const lastSeenId = useRef<number>(0);
   const wasRunning = useRef(false);
-  const hasRunInitialScan = useRef(false);
 
   const addLine = useCallback((message: string, type: FeedLine['type'] = 'info') => {
     setLines(prev => [{ id: String(++lineId), time: now(), message, type }, ...prev].slice(0, 200));
   }, []);
 
-  // Trigger one scan (on start or manual)
-  const triggerScan = useCallback(async () => {
-    setScanning(true);
-    addLine('Scan started — fetching market data...', 'scan');
-
-    try {
-      const res = await fetch('/api/bot/scan');
-      const data = await res.json();
-
-      if (data.status === 'completed' && data.results) {
-        const results: ScanResult[] = data.results;
-        for (const r of results) {
-          const sym = displaySymbol(r.symbol);
-          const wave = r.wave_analysis;
-          const waveTag = wave
-            ? ` [${wave.trend.toUpperCase()} RSI:${wave.rsi.toFixed(0)} Vol:${wave.volumeRatio.toFixed(1)}x]`
-            : '';
-
-          if (r.price === 0) {
-            addLine(`${sym}: no data available`, 'info');
-          } else if (r.skipped) {
-            addLine(`${sym}: $${r.price.toFixed(2)} — monitoring open trade${waveTag}`, 'info');
-          } else if (r.signals_found > 0) {
-            const direction = r.signal_type?.includes('SHORT') ? 'SHORT' : 'LONG';
-            if (r.trade_opened) {
-              addLine(`${sym}: $${r.price.toFixed(2)} — OPENED ${direction} (${r.signal_type})${waveTag}`, 'signal');
-            } else if (r.trade_error) {
-              addLine(`${sym}: $${r.price.toFixed(2)} — ${direction} signal but FAILED: ${r.trade_error}`, 'error');
-            } else {
-              addLine(`${sym}: $${r.price.toFixed(2)} — ${direction} SIGNAL: ${r.signal_type}${waveTag}`, 'signal');
-            }
-          } else {
-            addLine(`${sym}: $${r.price.toFixed(2)} — watching${waveTag}`, 'info');
-          }
-        }
-        const signals = results.filter(r => r.signals_found > 0).length;
-        addLine(`Scan completed — ${results.length} symbols, ${signals} signal${signals !== 1 ? 's' : ''}`, 'system');
-      } else if (data.status === 'skipped') {
-        addLine('Scan skipped — bot is stopped', 'system');
-      } else if (data.status === 'error') {
-        addLine(`Scan error: ${data.error}`, 'error');
-      }
-
-      onScanComplete?.();
-    } catch (err) {
-      addLine(`Scan failed: ${String(err)}`, 'error');
-    } finally {
-      setScanning(false);
-    }
-  }, [addLine, onScanComplete]);
+  // No client-side scanning — cron handles it every 60s
 
   // Fetch recent logs from database to backfill the feed
   const fetchLogs = useCallback(async () => {
@@ -194,29 +122,20 @@ export function LiveFeed({ isRunning, onScanComplete }: LiveFeedProps) {
     }
   }, [onScanComplete]);
 
-  // When bot starts: run one immediate scan + log it
+  // When bot starts/stops: just log it (cron handles actual scanning)
   useEffect(() => {
     if (isRunning && !wasRunning.current) {
-      addLine('Bot started — running initial scan', 'system');
-      hasRunInitialScan.current = false;
+      addLine('Bot enabled — cron will scan every 60s', 'system');
     } else if (!isRunning && wasRunning.current) {
       addLine('Bot stopped by user', 'system');
     }
     wasRunning.current = isRunning;
   }, [isRunning, addLine]);
 
-  // Trigger initial scan when bot starts
-  useEffect(() => {
-    if (isRunning && !hasRunInitialScan.current) {
-      hasRunInitialScan.current = true;
-      triggerScan();
-    }
-  }, [isRunning, triggerScan]);
-
-  // Poll DB logs every 15 seconds for background cron activity
+  // Poll DB logs every 10 seconds for cron activity
   useEffect(() => {
     fetchLogs();
-    const interval = setInterval(fetchLogs, 15000);
+    const interval = setInterval(fetchLogs, 10000);
     return () => clearInterval(interval);
   }, [fetchLogs]);
 
@@ -272,7 +191,7 @@ export function LiveFeed({ isRunning, onScanComplete }: LiveFeedProps) {
                 Connecting...
               </>
             ) : (
-              'Hit "Start Bot" to begin scanning'
+              'Enable bot — cron scans every 60s automatically'
             )}
           </div>
         ) : (
