@@ -10,7 +10,7 @@ interface FeedLine {
 }
 
 interface BotLogEntry {
-  id: number;
+  id: string;
   created_at: string;
   level: string;
   message: string;
@@ -71,7 +71,7 @@ export function LiveFeed({ isRunning, onScanComplete }: LiveFeedProps) {
   const scanning = false; // scanning happens server-side via cron
   const [lastFetch, setLastFetch] = useState<string | null>(null);
   const feedRef = useRef<HTMLDivElement>(null);
-  const lastSeenId = useRef<number>(0);
+  const lastSeenTs = useRef<string>('');
   const wasRunning = useRef(false);
 
   const addLine = useCallback((message: string, type: FeedLine['type'] = 'info') => {
@@ -83,15 +83,16 @@ export function LiveFeed({ isRunning, onScanComplete }: LiveFeedProps) {
   // Fetch recent logs from database to backfill the feed
   const fetchLogs = useCallback(async () => {
     try {
-      const res = await fetch('/api/bot/feed?limit=50');
+      const res = await fetch(`/api/bot/feed?limit=50&_t=${Date.now()}`, { cache: 'no-store' });
       if (!res.ok) return;
 
       const logs: BotLogEntry[] = await res.json();
       if (!Array.isArray(logs) || logs.length === 0) return;
 
-      const maxId = Math.max(...logs.map(l => l.id));
-      const hasNew = maxId > lastSeenId.current;
-      lastSeenId.current = maxId;
+      // Check if there are new logs by comparing latest timestamp
+      const latestTs = logs[0]?.created_at || '';
+      const hasNew = latestTs > lastSeenTs.current;
+      lastSeenTs.current = latestTs;
 
       // Convert logs to feed lines
       const feedLines: FeedLine[] = logs.map((entry) => {
@@ -104,13 +105,8 @@ export function LiveFeed({ isRunning, onScanComplete }: LiveFeedProps) {
         };
       });
 
-      // Merge: keep local lines (from live scans) + add DB lines we don't have
-      setLines(prev => {
-        const localIds = new Set(prev.map(l => l.id));
-        const newFromDb = feedLines.filter(l => !localIds.has(l.id));
-        if (newFromDb.length === 0 && prev.length > 0) return prev;
-        return [...prev.filter(l => !l.id.startsWith('log-')), ...feedLines].slice(0, 200);
-      });
+      // Replace feed with latest DB logs (cron writes everything to bot_log)
+      setLines(feedLines);
 
       setLastFetch(now());
 
@@ -132,10 +128,10 @@ export function LiveFeed({ isRunning, onScanComplete }: LiveFeedProps) {
     wasRunning.current = isRunning;
   }, [isRunning, addLine]);
 
-  // Poll DB logs every 10 seconds for cron activity
+  // Poll DB logs every 8 seconds for cron activity
   useEffect(() => {
     fetchLogs();
-    const interval = setInterval(fetchLogs, 10000);
+    const interval = setInterval(fetchLogs, 8000);
     return () => clearInterval(interval);
   }, [fetchLogs]);
 
